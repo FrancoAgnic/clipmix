@@ -10,23 +10,31 @@ App web para hacer **collages de video**: junta varios videos en uno solo y exp�
 - **Exportar** — genera un solo archivo de video (`.mp4` o `.webm` según el navegador) con audio mezclado.
 - **Reordenar** clips arrastrándolos, y elegir la calidad de exportación.
 
-## Cómo usarla
+Es una **PWA** (app instalable): funciona en el navegador y también puede instalarse en el celular con su propio ícono, a pantalla completa y sin conexión.
 
-No necesita instalación ni compilación. Basta con abrir la app en un navegador moderno (Chrome o Edge recomendados).
+## En el celular 📱
+
+1. Publica la carpeta en cualquier hosting con HTTPS (GitHub Pages, Netlify, Vercel…). *La instalación como app requiere HTTPS.*
+2. Abre la URL en el celular:
+   - **Android (Chrome):** menú ⋮ → «Instalar app» / «Añadir a pantalla de inicio», o toca el botón **⬇ Instalar app**.
+   - **iPhone (Safari):** botón Compartir → «Añadir a pantalla de inicio».
+3. Ábrela desde el ícono: se ve a pantalla completa como una app normal.
+4. Toca **+ Añadir** para elegir videos de tu galería, ordénalos con ▲▼, elige modo/formato y **Exportar**.
+
+### Publicar gratis con GitHub Pages
+En el repo: *Settings → Pages → Branch: `main` / root → Save*. La app queda en `https://<usuario>.github.io/clipmix/`.
+
+## En el escritorio 💻
 
 ### Opción rápida
 Abre `index.html` directamente en el navegador.
 
 ### Con un servidor local (recomendado)
-Algunos navegadores restringen funciones cuando el archivo se abre con `file://`. Para evitarlo:
+Algunas funciones se restringen al abrir con `file://`. Para evitarlo:
 
 ```bash
-# Con Python
-python3 -m http.server 8000
-# luego abre http://localhost:8000
-
-# O con Node
-npx serve
+python3 -m http.server 8000   # abre http://localhost:8000
+# o: npx serve
 ```
 
 ## Cómo funciona (técnico)
@@ -38,16 +46,20 @@ npx serve
 
 ## Limitaciones conocidas
 
-- El formato de salida depende del navegador: Chrome/Edge suelen exportar `.mp4` o `.webm`; Firefox exporta `.webm`.
+- El formato de salida depende del navegador: Chrome/Edge suelen exportar `.mp4` o `.webm`; Firefox y Safari exportan `.webm`.
 - La exportación ocurre en tiempo real (graba mientras reproduce), así que dura lo mismo que el video final.
+- **iPhone:** la exportación con `MediaRecorder` puede fallar en versiones viejas de iOS; usa Safari actualizado. La edición y la vista previa siempre funcionan. Si tu navegador no puede exportar, la app te lo avisa.
 - Videos muy pesados o muchos a la vez pueden exigir bastante al equipo.
 
 ## Estructura
 
 ```
-index.html   — interfaz
-style.css    — estilos
-app.js       — toda la lógica (carga, composición, export)
+index.html            — interfaz (mobile-first, con pestañas)
+style.css             — estilos + diseño responsive
+app.js                — toda la lógica (carga, composición, export, PWA)
+manifest.webmanifest  — metadatos de la app instalable
+sw.js                 — service worker (uso offline)
+icons/                — íconos de la app
 ```
 
 ## Licencia

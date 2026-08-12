@@ -163,6 +163,20 @@ function renderClipList() {
     const idx = document.createElement('div');
     idx.className = 'idx';
     idx.textContent = i + 1;
+
+    const moves = document.createElement('div');
+    moves.className = 'moves';
+    const up = document.createElement('button');
+    up.textContent = '▲'; up.title = 'Subir';
+    up.disabled = i === 0;
+    up.onclick = () => moveClip(clip.id, -1);
+    const down = document.createElement('button');
+    down.textContent = '▼'; down.title = 'Bajar';
+    down.disabled = i === state.clips.length - 1;
+    down.onclick = () => moveClip(clip.id, 1);
+    moves.appendChild(up);
+    moves.appendChild(down);
+
     const rm = document.createElement('button');
     rm.className = 'rm';
     rm.textContent = '✕';
@@ -170,6 +184,7 @@ function renderClipList() {
 
     li.appendChild(idx);
     li.appendChild(meta);
+    li.appendChild(moves);
     li.appendChild(rm);
 
     li.addEventListener('dragstart', () => { dragId = clip.id; li.classList.add('dragging'); });
@@ -187,6 +202,15 @@ function renderClipList() {
 
     list.appendChild(li);
   });
+}
+
+function moveClip(id, dir) {
+  const i = state.clips.findIndex(c => c.id === id);
+  const j = i + dir;
+  if (i < 0 || j < 0 || j >= state.clips.length) return;
+  [state.clips[i], state.clips[j]] = [state.clips[j], state.clips[i]];
+  renderClipList();
+  renderStatic();
 }
 
 function drawThumb(cnv, video) {
@@ -216,7 +240,7 @@ function updateControls() {
   const has = state.clips.length > 0;
   $('playBtn').disabled = !has || state.exporting;
   $('stopBtn').disabled = !state.playing;
-  $('exportBtn').disabled = !has || state.exporting;
+  $('exportBtn').disabled = !has || state.exporting || (typeof exportSupported !== 'undefined' && !exportSupported);
 }
 
 // ---------- Dibujo ----------
@@ -478,8 +502,59 @@ async function exportVideo() {
   }
 }
 
+// ---------- Pestañas (móvil) ----------
+document.querySelector('.tabbar').addEventListener('click', (e) => {
+  const btn = e.target.closest('.tab');
+  if (!btn) return;
+  const tab = btn.dataset.tab;
+  document.body.classList.remove('tab-videos', 'tab-editar');
+  document.body.classList.add('tab-' + tab);
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t === btn));
+  // reajustar el canvas al nuevo tamaño visible del escenario
+  requestAnimationFrame(applyFormat);
+});
+
+// ---------- Instalar como app (PWA) ----------
+let deferredPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  $('installBtn').hidden = false;
+});
+$('installBtn').onclick = async () => {
+  if (!deferredPrompt) return;
+  deferredPrompt.prompt();
+  await deferredPrompt.userChoice;
+  deferredPrompt = null;
+  $('installBtn').hidden = true;
+};
+window.addEventListener('appinstalled', () => { $('installBtn').hidden = true; });
+
+// ---------- Compatibilidad de exportación ----------
+function checkExportSupport() {
+  const canRecord = typeof MediaRecorder !== 'undefined';
+  const canCapture = typeof HTMLCanvasElement !== 'undefined' &&
+    typeof document.createElement('canvas').captureStream === 'function';
+  const warn = $('exportWarn');
+  if (!canRecord || !canCapture) {
+    warn.hidden = false;
+    warn.textContent = 'Tu navegador no soporta exportar video. En iPhone usa Safari actualizado; en Android usa Chrome. La edición y vista previa sí funcionan.';
+    return false;
+  }
+  return true;
+}
+const exportSupported = checkExportSupport();
+
+// ---------- Service Worker (funciona offline) ----------
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}
+
 // ---------- Arranque ----------
 window.addEventListener('resize', () => applyFormat());
+window.addEventListener('orientationchange', () => setTimeout(applyFormat, 200));
 buildLayoutTiles();
 buildFormatTiles();
 applyFormat();

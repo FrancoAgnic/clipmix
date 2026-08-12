@@ -2,22 +2,42 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>ClipMix — Collage de videos</title>
+  <meta name="theme-color" content="#0f1115" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="ClipMix" />
+  <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%235b8cff'/%3E%3Ctext x='50' y='72' font-size='64' text-anchor='middle' fill='white'%3E%E2%97%A7%3C/text%3E%3C/svg%3E" />
+  <link rel="apple-touch-icon" href="icons/icon-180.png" />
   <link rel="stylesheet" href="style.css" />
 </head>
-<body>
+<body class="tab-videos">
   <header class="topbar">
     <div class="brand">
       <span class="logo">◧</span>
       <h1>ClipMix</h1>
     </div>
-    <p class="tagline">Junta varios videos en uno solo y expórtalo. Todo en tu navegador — nada se sube a internet.</p>
+    <p class="tagline">Junta varios videos en uno. Todo en tu celular — nada se sube a internet.</p>
+    <button id="installBtn" class="btn install-btn" hidden>⬇ Instalar app</button>
   </header>
 
   <main class="layout">
-    <!-- Panel izquierdo: clips -->
+    <!-- Preview -->
+    <section class="panel stage-panel">
+      <div class="stage-wrap">
+        <canvas id="preview" width="1280" height="720"></canvas>
+      </div>
+      <div class="transport">
+        <button id="playBtn" class="btn" disabled>▶</button>
+        <button id="stopBtn" class="btn" disabled>■</button>
+        <span id="timeLabel" class="time">00:00 / 00:00</span>
+      </div>
+    </section>
+
+    <!-- Videos -->
     <aside class="panel clips-panel">
       <div class="panel-head">
         <h2>Videos</h2>
@@ -27,22 +47,10 @@
         </label>
       </div>
       <ul id="clipList" class="clip-list"></ul>
-      <p id="clipHint" class="hint">Añade videos para empezar. Puedes arrastrarlos para reordenar.</p>
+      <p id="clipHint" class="hint">Toca «Añadir» para elegir videos de tu galería. Usa ▲▼ para reordenar.</p>
     </aside>
 
-    <!-- Centro: preview -->
-    <section class="panel stage-panel">
-      <div class="stage-wrap">
-        <canvas id="preview" width="1280" height="720"></canvas>
-      </div>
-      <div class="transport">
-        <button id="playBtn" class="btn" disabled>▶ Reproducir</button>
-        <button id="stopBtn" class="btn" disabled>■ Detener</button>
-        <span id="timeLabel" class="time">00:00 / 00:00</span>
-      </div>
-    </section>
-
-    <!-- Panel derecho: opciones -->
+    <!-- Ajustes / edición -->
     <aside class="panel options-panel">
       <div class="opt-group">
         <h3>Modo</h3>
@@ -78,9 +86,16 @@
           <div class="bar"><div id="exportBar" class="bar-fill"></div></div>
           <span id="exportText">Preparando…</span>
         </div>
+        <p id="exportWarn" class="hint warn" hidden></p>
       </div>
     </aside>
   </main>
+
+  <!-- Barra de pestañas (solo en móvil) -->
+  <nav class="tabbar">
+    <button class="tab active" data-tab="videos">🎞️<span>Videos</span></button>
+    <button class="tab" data-tab="editar">🎛️<span>Editar</span></button>
+  </nav>
 
   <script src="app.js"></script>
 </body>
