@@ -545,10 +545,33 @@ function checkExportSupport() {
 }
 const exportSupported = checkExportSupport();
 
-// ---------- Service Worker (funciona offline) ----------
+// ---------- Service Worker (offline + auto-actualización) ----------
 if ('serviceWorker' in navigator) {
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloading) return;      // recarga una sola vez cuando entra una versión nueva
+    reloading = true;
+    window.location.reload();
+  });
+
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    navigator.serviceWorker.register('sw.js').then((reg) => {
+      // busca actualizaciones al abrir y al volver a la app
+      reg.update().catch(() => {});
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') reg.update().catch(() => {});
+      });
+      reg.addEventListener('updatefound', () => {
+        const nw = reg.installing;
+        if (!nw) return;
+        nw.addEventListener('statechange', () => {
+          // hay una versión nueva lista y ya había una controlando -> actívala
+          if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+            nw.postMessage('skipWaiting');
+          }
+        });
+      });
+    }).catch(() => {});
   });
 }
 
