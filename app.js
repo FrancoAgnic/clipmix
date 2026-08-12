@@ -467,10 +467,35 @@ function drawCover(c, video, dx, dy, dw, dh) {
   c.drawImage(video, sx, sy, sw, sh, dx, dy, dw, dh);
 }
 
+// Mantiene una copia del último fotograma decodificado de cada clip, para que
+// nunca se vea negro si el navegador libera el decodificador del <video>.
+function frameSource(clip) {
+  const v = clip.video;
+  if (v.readyState >= 2 && v.videoWidth) {
+    if (!clip._frame) clip._frame = document.createElement('canvas');
+    if (clip._frame.width !== v.videoWidth) { clip._frame.width = v.videoWidth; clip._frame.height = v.videoHeight; }
+    try { clip._frame.getContext('2d').drawImage(v, 0, 0); } catch (_) {}
+    return v;
+  }
+  // sin fotograma disponible: intentamos recuperarlo con un micro-seek (una vez)
+  if (!state.playing && !state.exporting && !clip._recovering && isFinite(v.currentTime) && v.readyState >= 1) {
+    clip._recovering = true;
+    const t = v.currentTime;
+    const done = () => { clip._recovering = false; v.removeEventListener('seeked', done); renderStatic(); };
+    v.addEventListener('seeked', done);
+    try { v.currentTime = Math.max(0, t + (t < (clip.duration || 0) - 0.05 ? 0.03 : -0.03)); }
+    catch (_) { clip._recovering = false; }
+  }
+  return (clip._frame && clip._frame.width) ? clip._frame : null;
+}
+
 // Dibuja un clip dentro de una celda aplicando su transformación (mover/escalar/rotar)
 function drawClipInCell(c, clip, dx, dy, dw, dh) {
-  const v = clip.video;
-  if (v.readyState < 2) { c.fillStyle = '#0c0e12'; c.fillRect(dx, dy, dw, dh); return; }
+  const src = frameSource(clip);
+  if (!src) { c.fillStyle = '#0c0e12'; c.fillRect(dx, dy, dw, dh); return; }
+  const isVid = src.tagName === 'VIDEO';
+  const vw = (isVid ? src.videoWidth : src.width) || 16;
+  const vh = (isVid ? src.videoHeight : src.height) || 9;
   const t = clip.transform;
   c.save();
   c.beginPath(); c.rect(dx, dy, dw, dh); c.clip();
@@ -478,10 +503,9 @@ function drawClipInCell(c, clip, dx, dy, dw, dh) {
   const cy = dy + dh / 2 + t.y * dh;
   c.translate(cx, cy);
   if (t.rot) c.rotate(t.rot * Math.PI / 180);
-  const vw = v.videoWidth || 16, vh = v.videoHeight || 9;
   const base = Math.max(dw / vw, dh / vh) * (t.scale || 1);
   const w = vw * base, h = vh * base;
-  c.drawImage(v, -w / 2, -h / 2, w, h);
+  c.drawImage(src, -w / 2, -h / 2, w, h);
   c.restore();
 }
 
