@@ -91,6 +91,29 @@
     </aside>
   </main>
 
+  <!-- Modal: constructor de presets -->
+  <div id="presetModal" class="modal" hidden>
+    <div class="modal-card">
+      <h3>Nuevo preset de cuadrícula</h3>
+      <div id="presetPreview" class="preset-preview"></div>
+      <label class="slider-row">
+        <span class="slab">Filas</span>
+        <input id="presetRows" type="range" min="1" max="5" step="1" value="2" />
+        <span id="presetRowsVal" class="sval">2</span>
+      </label>
+      <label class="slider-row">
+        <span class="slab">Columnas</span>
+        <input id="presetCols" type="range" min="1" max="5" step="1" value="2" />
+        <span id="presetColsVal" class="sval">2</span>
+      </label>
+      <input id="presetName" class="text-input" type="text" placeholder="Nombre (opcional)" maxlength="14" />
+      <div class="modal-actions">
+        <button id="presetCancel" class="btn">Cancelar</button>
+        <button id="presetSave" class="btn btn-primary">Guardar</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Barra de pestañas (solo en móvil) -->
   <nav class="tabbar">
     <button class="tab active" data-tab="videos">🎞️<span>Videos</span></button>
