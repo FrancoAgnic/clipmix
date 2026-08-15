@@ -13,6 +13,8 @@ const state = {
   playing: false,
   exporting: false,
   selectedId: null,     // clip seleccionado para encuadrar
+  frameColor: '#ffffff',// color del marco de la cuadrícula
+  frameWidth: 0.8,      // grosor del marco (% del lado menor). 0 = sin marco
 };
 
 let nextId = 1;
@@ -444,6 +446,7 @@ $('modeSeg').addEventListener('click', (e) => {
   state.mode = btn.dataset.mode;
   document.querySelectorAll('.seg').forEach(s => s.classList.toggle('active', s === btn));
   $('layoutGroup').style.display = state.mode === 'collage' ? 'block' : 'none';
+  $('frameGroup').style.display = state.mode === 'collage' ? 'block' : 'none';
   $('modeHint').textContent = state.mode === 'collage'
     ? 'Los videos se reproducen a la vez, uno en cada celda.'
     : 'Los videos se unen uno tras otro en un video más largo.';
@@ -532,14 +535,16 @@ function composite(forExport) {
     else { ctx.fillStyle = '#0c0e12'; ctx.fillRect(dx, dy, dw, dh); }
   });
 
-  // 2) marco blanco (separadores + borde exterior)
+  // 2) marco (separadores + borde exterior) con color y grosor elegidos
   if (state.mode === 'collage') {
-    const fw = Math.max(2, Math.min(W, H) * 0.008);
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineJoin = 'miter';
-    ctx.lineWidth = fw;
-    rects.forEach(({ dx, dy, dw, dh }) => ctx.strokeRect(dx, dy, dw, dh)); // líneas internas
-    ctx.strokeRect(fw / 2, fw / 2, W - fw, H - fw);                        // borde exterior completo
+    const fw = Math.min(W, H) * (state.frameWidth / 100);
+    if (fw >= 0.75) {
+      ctx.strokeStyle = state.frameColor;
+      ctx.lineJoin = 'miter';
+      ctx.lineWidth = fw;
+      rects.forEach(({ dx, dy, dw, dh }) => ctx.strokeRect(dx, dy, dw, dh)); // líneas internas
+      ctx.strokeRect(fw / 2, fw / 2, W - fw, H - fw);                        // borde exterior completo
+    }
   }
 
   // 3) resaltado del clip seleccionado (no se graba al exportar)
@@ -933,6 +938,53 @@ if ('serviceWorker' in navigator) {
   });
 }
 
+// ---------- Marco: color y grosor ----------
+const SETTINGS_KEY = 'clipmix_settings_v1';
+const FRAME_SWATCHES = ['#ffffff', '#000000', '#ff4d4d', '#ffd23f', '#34d399', '#5b8cff', '#ff7ac2', '#8b5cf6'];
+
+function loadSettings() {
+  try {
+    const s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+    if (s.frameColor) state.frameColor = s.frameColor;
+    if (typeof s.frameWidth === 'number') state.frameWidth = s.frameWidth;
+  } catch (_) {}
+}
+function saveSettings() {
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ frameColor: state.frameColor, frameWidth: state.frameWidth })); } catch (_) {}
+}
+function buildSwatches() {
+  const w = $('frameSwatches');
+  w.innerHTML = '';
+  FRAME_SWATCHES.forEach(col => {
+    const b = document.createElement('button');
+    b.className = 'swatch' + (col.toLowerCase() === state.frameColor.toLowerCase() ? ' active' : '');
+    b.style.background = col;
+    b.title = col;
+    b.onclick = () => setFrameColor(col);
+    w.appendChild(b);
+  });
+}
+function setFrameColor(col) {
+  state.frameColor = col;
+  $('frameColor').value = col;
+  buildSwatches();
+  renderStatic();
+  saveSettings();
+}
+function initFrameControls() {
+  $('frameColor').value = state.frameColor;
+  $('frameWidth').value = state.frameWidth;
+  $('frameWidthVal').textContent = state.frameWidth + '%';
+  buildSwatches();
+  $('frameColor').addEventListener('input', (e) => setFrameColor(e.target.value));
+  $('frameWidth').addEventListener('input', (e) => {
+    state.frameWidth = parseFloat(e.target.value);
+    $('frameWidthVal').textContent = state.frameWidth + '%';
+    renderStatic();
+    saveSettings();
+  });
+}
+
 // ---------- Modal: listeners ----------
 $('presetRows').addEventListener('input', updatePresetPreview);
 $('presetCols').addEventListener('input', updatePresetPreview);
@@ -943,9 +995,11 @@ $('presetModal').addEventListener('click', (e) => { if (e.target.id === 'presetM
 // ---------- Arranque ----------
 window.addEventListener('resize', () => applyFormat());
 window.addEventListener('orientationchange', () => setTimeout(applyFormat, 200));
+loadSettings();
 loadPresets();
 buildLayoutTiles();
 buildFormatTiles();
+initFrameControls();
 applyFormat();
 renderStatic();
 updateControls();
