@@ -524,22 +524,36 @@ function composite(forExport) {
   ctx.fillRect(0, 0, W, H);
 
   const rects = cellRects();
+
+  // 1) videos
   rects.forEach(({ i, dx, dy, dw, dh }) => {
     const clip = state.clips[i];
     if (clip) drawClipInCell(ctx, clip, dx, dy, dw, dh);
     else { ctx.fillStyle = '#0c0e12'; ctx.fillRect(dx, dy, dw, dh); }
-    if (state.mode === 'collage') {
-      ctx.strokeStyle = 'rgba(0,0,0,.6)';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(dx, dy, dw, dh);
-    }
-    // resaltar la celda del clip seleccionado (no en el video exportado)
-    if (!forExport && clip && clip.id === state.selectedId) {
-      ctx.strokeStyle = '#34d399';
-      ctx.lineWidth = Math.max(3, W * 0.004);
-      ctx.strokeRect(dx + ctx.lineWidth / 2, dy + ctx.lineWidth / 2, dw - ctx.lineWidth, dh - ctx.lineWidth);
-    }
   });
+
+  // 2) marco blanco (separadores + borde exterior)
+  if (state.mode === 'collage') {
+    const fw = Math.max(2, Math.min(W, H) * 0.008);
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineJoin = 'miter';
+    ctx.lineWidth = fw;
+    rects.forEach(({ dx, dy, dw, dh }) => ctx.strokeRect(dx, dy, dw, dh)); // líneas internas
+    ctx.strokeRect(fw / 2, fw / 2, W - fw, H - fw);                        // borde exterior completo
+  }
+
+  // 3) resaltado del clip seleccionado (no se graba al exportar)
+  if (!forExport) {
+    rects.forEach(({ i, dx, dy, dw, dh }) => {
+      const clip = state.clips[i];
+      if (clip && clip.id === state.selectedId) {
+        const lw = Math.max(3, W * 0.004);
+        ctx.strokeStyle = '#34d399';
+        ctx.lineWidth = lw;
+        ctx.strokeRect(dx + lw / 2, dy + lw / 2, dw - lw, dh - lw);
+      }
+    });
+  }
 }
 
 function renderStatic() {
