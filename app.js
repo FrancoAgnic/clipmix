@@ -87,7 +87,7 @@ function buildLayoutTiles() {
     tile.className = 'opt-tile' + (key === state.layout ? ' active' : '');
     tile.dataset.layout = key;
     tile.innerHTML = layoutSVG(def) + `<span>${def.label}</span>`;
-    tile.onclick = () => { state.layout = key; clampSelection(); refreshTiles(); renderStatic(); };
+    tile.onclick = () => { state.layout = key; clampSelection(); refreshTiles(); renderStatic(); commit(); };
     if (def.custom) {
       const del = document.createElement('span');
       del.className = 'tile-del';
@@ -126,7 +126,7 @@ function buildFormatTiles() {
     tile.innerHTML =
       `<svg viewBox="0 0 34 34"><rect class="cell" x="${(34 - bw) / 2}" y="${(34 - bh) / 2}" width="${bw}" height="${bh}" rx="2"/></svg>` +
       `<span>${def.label}</span>`;
-    tile.onclick = () => { state.format = key; applyFormat(); refreshTiles(); };
+    tile.onclick = () => { state.format = key; applyFormat(); refreshTiles(); commit(); };
     grid.appendChild(tile);
   });
 }
@@ -145,6 +145,7 @@ function deletePreset(key) {
   if (state.layout === key) state.layout = '2x2';
   buildLayoutTiles();
   renderStatic();
+  commit();
 }
 
 function applyFormat() {
@@ -216,6 +217,7 @@ function addClip(file) {
     renderTextList();
     updateControls();
     renderStatic();
+    commit();
   };
 
   video.addEventListener('loadedmetadata', () => {
@@ -245,6 +247,7 @@ function removeClip(id) {
   renderClipList();
   updateControls();
   renderStatic();
+  commit();
 }
 
 function moveClip(id, dir) {
@@ -254,6 +257,7 @@ function moveClip(id, dir) {
   [state.clips[i], state.clips[j]] = [state.clips[j], state.clips[i]];
   renderClipList();
   renderStatic();
+  commit();
 }
 
 function selectClip(id) {
@@ -402,6 +406,7 @@ function buildClipEditor(clip, durEl) {
     scaleRow.input.value = 100; scaleRow.val.textContent = '100%';
     rotRow.input.value = 0; rotRow.val.textContent = '0°';
     renderStatic();
+    commit();
   };
   frWrap.appendChild(scaleRow.el);
   frWrap.appendChild(rotRow.el);
@@ -444,17 +449,21 @@ function drawThumb(cnv, video) {
 }
 
 // ---------- Modo ----------
-$('modeSeg').addEventListener('click', (e) => {
-  const btn = e.target.closest('.seg');
-  if (!btn) return;
-  state.mode = btn.dataset.mode;
-  document.querySelectorAll('.seg').forEach(s => s.classList.toggle('active', s === btn));
+function syncModeUI() {
+  document.querySelectorAll('.seg').forEach(s => s.classList.toggle('active', s.dataset.mode === state.mode));
   $('layoutGroup').style.display = state.mode === 'collage' ? 'block' : 'none';
   $('frameGroup').style.display = state.mode === 'collage' ? 'block' : 'none';
   $('modeHint').textContent = state.mode === 'collage'
     ? 'Los videos se reproducen a la vez, uno en cada celda.'
     : 'Los videos se unen uno tras otro en un video más largo.';
+}
+$('modeSeg').addEventListener('click', (e) => {
+  const btn = e.target.closest('.seg');
+  if (!btn) return;
+  state.mode = btn.dataset.mode;
+  syncModeUI();
   renderStatic();
+  commit();
 });
 
 function updateControls() {
@@ -592,7 +601,7 @@ function renderStatic() {
 
 // ---------- Gestos de encuadre en el canvas ----------
 const pointers = new Map();
-let panLast = null, pinch = null, textDrag = false;
+let panLast = null, pinch = null, textDrag = false, gestureChanged = false;
 
 canvas.addEventListener('pointerdown', (e) => {
   if (state.exporting) return;
@@ -637,6 +646,7 @@ canvas.addEventListener('pointermove', (e) => {
       tx.x = clamp(tx.x + (p.x - panLast.x) / canvas.width, 0, 1);
       tx.y = clamp(tx.y + (p.y - panLast.y) / canvas.height, 0, 1);
       panLast = p;
+      gestureChanged = true;
       if (!state.playing) renderStatic();
     }
     return;
@@ -645,7 +655,7 @@ canvas.addEventListener('pointermove', (e) => {
   if (pointers.size === 2 && pinch && pinch.text) {
     const pts = [...pointers.values()];
     const tx = selectedText();
-    if (tx) { tx.size = clamp(pinch.size * (dist(pts[0], pts[1]) / pinch.dist), 2, 40); syncTextSize(tx); if (!state.playing) renderStatic(); }
+    if (tx) { tx.size = clamp(pinch.size * (dist(pts[0], pts[1]) / pinch.dist), 2, 40); syncTextSize(tx); gestureChanged = true; if (!state.playing) renderStatic(); }
     return;
   }
 
@@ -659,6 +669,7 @@ canvas.addEventListener('pointermove', (e) => {
       clip.transform.y += (p.y - panLast.y) / rect.dh;
     }
     panLast = p;
+    gestureChanged = true;
     if (!state.playing) renderStatic();
   } else if (pointers.size === 2 && pinch && !pinch.text) {
     const pts = [...pointers.values()];
@@ -667,6 +678,7 @@ canvas.addEventListener('pointermove', (e) => {
     clip.transform.scale = clamp(pinch.scale * (d / pinch.dist), 0.2, 5);
     clip.transform.rot = pinch.rot + (a - pinch.ang) * 180 / Math.PI;
     syncEditorSliders(clip);
+    gestureChanged = true;
     if (!state.playing) renderStatic();
   }
 });
@@ -674,7 +686,10 @@ canvas.addEventListener('pointermove', (e) => {
 function endPointer(e) {
   pointers.delete(e.pointerId);
   if (pointers.size < 2) pinch = null;
-  if (pointers.size === 0) { panLast = null; textDrag = false; }
+  if (pointers.size === 0) {
+    panLast = null; textDrag = false;
+    if (gestureChanged) { gestureChanged = false; commit(); }
+  }
 }
 canvas.addEventListener('pointerup', endPointer);
 canvas.addEventListener('pointercancel', endPointer);
@@ -799,11 +814,14 @@ function stopPreview() {
 $('exportBtn').onclick = exportVideo;
 
 function pickMime() {
+  // Preferimos WebM porque podemos reparar su duración (ver webm-duration.js).
+  // MP4 queda como respaldo para navegadores que no graban WebM (iPhone/Safari).
   const candidates = [
-    'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
     'video/webm;codecs=vp9,opus',
     'video/webm;codecs=vp8,opus',
     'video/webm',
+    'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+    'video/mp4',
   ];
   return candidates.find(m => MediaRecorder.isTypeSupported(m)) || '';
 }
@@ -935,6 +953,7 @@ function savePresetFromBuilder() {
   closePresetBuilder();
   clampSelection();
   renderStatic();
+  commit();
 }
 
 // ---------- Textos ----------
@@ -1003,6 +1022,7 @@ function addText() {
   state.selectedTextId = t.id;
   renderTextList();
   renderStatic();
+  commit();
 }
 function removeText(id) {
   const i = state.texts.findIndex(t => t.id === id);
@@ -1011,6 +1031,7 @@ function removeText(id) {
   if (state.selectedTextId === id) state.selectedTextId = null;
   renderTextList();
   renderStatic();
+  commit();
 }
 function selectText(id) {
   state.selectedTextId = id;
@@ -1101,7 +1122,7 @@ function buildTextEditor(tx, titleEl, timeEl, maxT) {
   const bold = document.createElement('button');
   bold.className = 'btn small bold-toggle' + (tx.bold ? ' on' : '');
   bold.textContent = 'Negrita';
-  bold.onclick = () => { tx.bold = !tx.bold; bold.classList.toggle('on', tx.bold); renderStatic(); };
+  bold.onclick = () => { tx.bold = !tx.bold; bold.classList.toggle('on', tx.bold); renderStatic(); commit(); };
   styleRow.appendChild(color);
   styleRow.appendChild(bold);
   box.appendChild(styleRow);
@@ -1198,7 +1219,7 @@ function buildSwatches() {
     b.className = 'swatch' + (col.toLowerCase() === state.frameColor.toLowerCase() ? ' active' : '');
     b.style.background = col;
     b.title = col;
-    b.onclick = () => setFrameColor(col);
+    b.onclick = () => { setFrameColor(col); commit(); };
     w.appendChild(b);
   });
 }
@@ -1209,11 +1230,14 @@ function setFrameColor(col) {
   renderStatic();
   saveSettings();
 }
-function initFrameControls() {
+function refreshFrameInputs() {
   $('frameColor').value = state.frameColor;
   $('frameWidth').value = state.frameWidth;
   $('frameWidthVal').textContent = state.frameWidth + '%';
   buildSwatches();
+}
+function initFrameControls() {
+  refreshFrameInputs();
   $('frameColor').addEventListener('input', (e) => setFrameColor(e.target.value));
   $('frameWidth').addEventListener('input', (e) => {
     state.frameWidth = parseFloat(e.target.value);
@@ -1230,6 +1254,101 @@ $('presetSave').addEventListener('click', savePresetFromBuilder);
 $('presetCancel').addEventListener('click', closePresetBuilder);
 $('presetModal').addEventListener('click', (e) => { if (e.target.id === 'presetModal') closePresetBuilder(); });
 
+// ---------- Historial: deshacer / rehacer ----------
+let history = [];
+let histIndex = -1;
+const HIST_MAX = 80;
+
+function snapshot() {
+  return {
+    order: state.clips.map(c => c.id),
+    clips: state.clips.map(c => ({
+      id: c.id, trimStart: c.trimStart, trimEnd: c.trimEnd, volume: c.volume,
+      transform: { ...c.transform },
+    })),
+    texts: state.texts.map(t => ({ ...t })),
+    layout: state.layout, format: state.format, mode: state.mode,
+    frameColor: state.frameColor, frameWidth: state.frameWidth,
+    selectedId: state.selectedId, selectedTextId: state.selectedTextId,
+  };
+}
+
+// Guarda un nuevo estado en el historial (si cambió algo respecto al último)
+function commit() {
+  const snap = snapshot();
+  const json = JSON.stringify(snap);
+  if (histIndex >= 0 && JSON.stringify(history[histIndex]) === json) return; // sin cambios
+  history = history.slice(0, histIndex + 1);
+  history.push(snap);
+  if (history.length > HIST_MAX) history.shift();
+  histIndex = history.length - 1;
+  updateUndoButtons();
+}
+
+function applySnapshot(s) {
+  const byId = new Map(state.clips.map(c => [c.id, c]));
+  // reordenar clips según el snapshot (los que no estén, van al final)
+  const arr = [];
+  s.order.forEach(id => { const c = byId.get(id); if (c) arr.push(c); });
+  state.clips.forEach(c => { if (!s.order.includes(c.id)) arr.push(c); });
+  state.clips = arr;
+  // aplicar propiedades por clip
+  s.clips.forEach(cs => {
+    const c = byId.get(cs.id);
+    if (c) { c.trimStart = cs.trimStart; c.trimEnd = cs.trimEnd; c.volume = cs.volume; c.transform = { ...cs.transform }; applyVolume(c); }
+  });
+  // textos
+  state.texts = s.texts.map(t => ({ ...t }));
+  state.layout = LAYOUTS[s.layout] ? s.layout : state.layout;
+  state.format = FORMATS[s.format] ? s.format : state.format;
+  state.mode = s.mode;
+  state.frameColor = s.frameColor;
+  state.frameWidth = s.frameWidth;
+  state.selectedId = byId.has(s.selectedId) ? s.selectedId : (state.clips[0]?.id ?? null);
+  state.selectedTextId = state.texts.find(t => t.id === s.selectedTextId) ? s.selectedTextId : null;
+  // refrescar toda la interfaz
+  syncModeUI();
+  refreshTiles();
+  refreshFrameInputs();
+  renderClipList();
+  renderTextList();
+  applyFormat();
+  renderStatic();
+  saveSettings();
+}
+
+function undo() {
+  if (histIndex <= 0) return;
+  histIndex--;
+  applySnapshot(history[histIndex]);
+  updateUndoButtons();
+}
+function redo() {
+  if (histIndex >= history.length - 1) return;
+  histIndex++;
+  applySnapshot(history[histIndex]);
+  updateUndoButtons();
+}
+function updateUndoButtons() {
+  $('undoBtn').disabled = histIndex <= 0;
+  $('redoBtn').disabled = histIndex >= history.length - 1;
+}
+
+$('undoBtn').onclick = undo;
+$('redoBtn').onclick = redo;
+
+// Deshacer/rehacer con atajos de teclado (escritorio)
+window.addEventListener('keydown', (e) => {
+  const k = e.key.toLowerCase();
+  if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
+  else if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redo(); }
+});
+
+// Confirmar cambios: cualquier slider/color/textarea que termine de cambiar
+document.addEventListener('change', (e) => {
+  if (e.target.matches('input[type=range], input[type=color], textarea')) commit();
+});
+
 // ---------- Arranque ----------
 window.addEventListener('resize', () => applyFormat());
 window.addEventListener('orientationchange', () => setTimeout(applyFormat, 200));
@@ -1242,3 +1361,5 @@ renderTextList();
 applyFormat();
 renderStatic();
 updateControls();
+commit();            // estado inicial en el historial
+updateUndoButtons();
