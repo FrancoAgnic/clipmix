@@ -13,7 +13,11 @@ App web para hacer **collages de video**: junta varios videos en uno solo y exp�
 - **Marco configurable** — color (paleta + selector libre) y grosor de las líneas de la cuadrícula.
 - **Presets de cuadrícula propios** — crea tus propias grillas (filas × columnas), ponles nombre y guárdalas; quedan disponibles siempre.
 - **Formatos** — 16:9, 9:16 (vertical), 1:1 (cuadrado), 4:5 (retrato), 4:3.
-- **Exportar** — genera un solo archivo de video (`.mp4` o `.webm` según el navegador) con audio mezclado.
+- **Exportar a MP4 (H.264/AAC)** con WebCodecs cuando el dispositivo lo permite (compatible con Instagram, duración correcta, menos recursos que “grabar la pantalla”). Si no hay WebCodecs, usa MediaRecorder como respaldo (y repara la duración del WebM).
+- **Deshacer / rehacer** (↶ ↷ y `Ctrl+Z` / `Ctrl+Shift+Z`) en toda la edición.
+- **Autoguardado**: el proyecto (videos incluidos) se guarda solo; si refrescas o se cierra, al volver sigue tu edición.
+- **Modo proxy**: la vista previa se renderiza a menor resolución para ir fluido; la exportación es siempre en alta.
+- **Cancelar** la exportación en cualquier momento (con watchdog anti-cuelgues).
 - **Reordenar** clips con ▲▼ y elegir la calidad de exportación.
 
 Es una **PWA** (app instalable): funciona en el navegador y también puede instalarse en el celular con su propio ícono, a pantalla completa y sin conexión.

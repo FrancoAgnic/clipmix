@@ -17,6 +17,7 @@ const state = {
   frameWidth: 0.8,      // grosor del marco (% del lado menor). 0 = sin marco
   texts: [],            // {id, content, start, duration, x, y, size, color, bold}
   selectedTextId: null, // texto seleccionado (para mover/editar)
+  proxy: true,          // edición ligera (baja resolución); export siempre en alta
 };
 
 let nextId = 1;
@@ -148,15 +149,36 @@ function deletePreset(key) {
   commit();
 }
 
+// Resolución interna del canvas. En modo proxy (edición) usamos un lado máximo
+// más pequeño para que sea liviano; al exportar volvemos a resolución completa.
+const PROXY_MAX = 640;
+let forceFullRes = false;
+
+function targetResolution() {
+  const f = FORMATS[state.format];
+  if (forceFullRes || !state.proxy) return { w: f.w, h: f.h };
+  const scale = Math.min(1, PROXY_MAX / Math.max(f.w, f.h));
+  return { w: Math.round(f.w * scale / 2) * 2, h: Math.round(f.h * scale / 2) * 2 };
+}
+
 function applyFormat() {
   const f = FORMATS[state.format];
-  canvas.width = f.w;
-  canvas.height = f.h;
+  const r = targetResolution();
+  canvas.width = r.w;
+  canvas.height = r.h;
   const wrap = canvas.parentElement.getBoundingClientRect();
   const scale = Math.min(wrap.width / f.w, wrap.height / f.h);
   canvas.style.width = (f.w * scale) + 'px';
   canvas.style.height = (f.h * scale) + 'px';
   renderStatic();
+}
+
+// Antes de exportar pasamos a resolución completa; devuelve función para restaurar.
+function beginFullResForExport() {
+  if (forceFullRes || !state.proxy) return () => {};
+  forceFullRes = true;
+  applyFormat();
+  return () => { forceFullRes = false; applyFormat(); };
 }
 
 // ---------- Audio (contexto persistente + ganancia por clip) ----------
@@ -188,11 +210,14 @@ function applyVolume(clip) {
 
 // ---------- Carga de videos ----------
 $('fileInput').addEventListener('change', (e) => {
-  [...e.target.files].forEach(addClip);
+  [...e.target.files].forEach(f => makeClip(f));
   e.target.value = '';
 });
 
-function addClip(file) {
+function addClip(file) { return makeClip(file); }
+
+// Crea un clip. opts.restore=true conserva id/recorte/volumen/encuadre guardados.
+function makeClip(file, opts = {}) {
   const url = URL.createObjectURL(file);
   const video = document.createElement('video');
   video.src = url;
@@ -201,29 +226,34 @@ function addClip(file) {
   video.playsInline = true;
 
   const clip = {
-    id: nextId++, file, url, video, name: file.name,
-    duration: 0, trimStart: 0, trimEnd: 0, volume: 1,
-    transform: { scale: 1, x: 0, y: 0, rot: 0 },
+    id: opts.id != null ? opts.id : nextId++, file, url, video, name: file.name,
+    duration: 0, trimStart: opts.trimStart || 0, trimEnd: opts.trimEnd || 0,
+    volume: (typeof opts.volume === 'number') ? opts.volume : 1,
+    transform: opts.transform ? { ...opts.transform } : { scale: 1, x: 0, y: 0, rot: 0 },
     _done: false, _open: false, _srcNode: null, _gainNode: null,
   };
+  if (opts.id != null) nextId = Math.max(nextId, opts.id + 1);
   state.clips.push(clip);
 
   const finalizeMeta = () => {
     clip.duration = isFinite(video.duration) ? video.duration : 0;
-    clip.trimEnd = clip.duration;
-    if (state.selectedId == null) state.selectedId = clip.id;
-    try { video.currentTime = 0; } catch (_) {}
+    if (opts.restore) {
+      if (!clip.trimEnd || clip.trimEnd > clip.duration) clip.trimEnd = clip.duration;
+      clip.trimStart = Math.min(clip.trimStart, Math.max(0, clip.duration - 0.1));
+    } else {
+      clip.trimEnd = clip.duration;
+    }
+    if (state.selectedId == null && !opts.restore) state.selectedId = clip.id;
+    try { video.currentTime = clip.trimStart || 0; } catch (_) {}
     renderClipList();
     renderTextList();
     updateControls();
     renderStatic();
-    commit();
+    if (!opts.restore) { commit(); saveProjectSoon(); saveClipBlob(clip); }
   };
 
   video.addEventListener('loadedmetadata', () => {
     if (isFinite(video.duration)) { finalizeMeta(); return; }
-    // Algunos videos (webm de MediaRecorder) reportan duración Infinity hasta
-    // que se busca hasta el final: forzamos la resolución de la duración.
     const fix = () => { video.removeEventListener('timeupdate', fix); finalizeMeta(); };
     video.addEventListener('timeupdate', fix);
     try { video.currentTime = 1e101; } catch (_) { finalizeMeta(); }
@@ -231,6 +261,7 @@ function addClip(file) {
 
   renderClipList();
   updateControls();
+  return clip;
 }
 
 function removeClip(id) {
@@ -248,6 +279,8 @@ function removeClip(id) {
   updateControls();
   renderStatic();
   commit();
+  delClipBlob(id);
+  saveProjectSoon();
 }
 
 function moveClip(id, dir) {
@@ -811,19 +844,226 @@ function stopPreview() {
 }
 
 // ---------- Exportar ----------
+let exportJob = null;
 $('exportBtn').onclick = exportVideo;
+$('exportCancelBtn').onclick = () => { if (exportJob) exportJob.cancel(); };
 
 function pickMime() {
-  // Preferimos WebM porque podemos reparar su duración (ver webm-duration.js).
-  // MP4 queda como respaldo para navegadores que no graban WebM (iPhone/Safari).
+  // Para el respaldo MediaRecorder: preferimos MP4 (compatible con Instagram);
+  // WebM como último recurso (su duración se repara con webm-duration.js).
   const candidates = [
+    'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+    'video/mp4',
     'video/webm;codecs=vp9,opus',
     'video/webm;codecs=vp8,opus',
     'video/webm',
-    'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
-    'video/mp4',
   ];
   return candidates.find(m => MediaRecorder.isTypeSupported(m)) || '';
+}
+
+// Elige el mejor método y códecs disponibles (WebCodecs->MP4 si se puede)
+async function chooseExportMethod() {
+  if (typeof VideoEncoder !== 'undefined' && typeof VideoFrame !== 'undefined' && window.Mp4Muxer) {
+    const W = canvas.width, H = canvas.height;
+    const vids = [['avc1.42001f', 'avc'], ['avc1.4d0028', 'avc'], ['avc1.640028', 'avc'], ['vp09.00.10.08', 'vp9'], ['av01.0.04M.08', 'av1']];
+    let video = null;
+    for (const [codec, mux] of vids) {
+      try { if ((await VideoEncoder.isConfigSupported({ codec, width: W, height: H, bitrate: 4e6, framerate: 30 })).supported) { video = { codec, muxerCodec: mux }; break; } } catch (_) {}
+    }
+    if (video) {
+      let audioC = null;
+      if (typeof AudioEncoder !== 'undefined' && typeof AudioData !== 'undefined') {
+        const auds = [['mp4a.40.2', 'aac'], ['opus', 'opus']];
+        for (const [codec, mux] of auds) {
+          try { if ((await AudioEncoder.isConfigSupported({ codec, sampleRate: 48000, numberOfChannels: 2, bitrate: 128000 })).supported) { audioC = { codec, muxerCodec: mux, sampleRate: 48000, channels: 2 }; break; } } catch (_) {}
+        }
+      }
+      return { type: 'webcodecs', video, audio: audioC };
+    }
+  }
+  return { type: 'mediarecorder' };
+}
+
+// Reproduce los clips respetando el recorte y llama onFrame(tSeg) por cuadro.
+function runExportPlayback(onFrame) {
+  let cancelled = false, raf = null;
+  const stop = () => { if (raf) cancelAnimationFrame(raf); state.clips.forEach(c => c.video.pause()); };
+  const promise = (async () => {
+    if (state.mode === 'collage') {
+      const active = activeCollageClips();
+      active.forEach(c => { c._done = false; seekTo(c, c.trimStart); });
+      await Promise.all(active.map(c => c.video.play().catch(() => {})));
+      await new Promise((resolve) => {
+        const loop = async () => {
+          if (cancelled) { resolve(); return; }
+          composite(true);
+          const t = active.length ? Math.max(0, ...active.map(c => clamp(c.video.currentTime - c.trimStart, 0, clipDur(c)))) : 0;
+          await onFrame(t);
+          active.forEach(c => { if (!c._done && (c.video.currentTime >= c.trimEnd - 0.03 || c.video.ended)) { c.video.pause(); c._done = true; } });
+          if (!active.length || active.every(c => c._done)) { resolve(); return; }
+          raf = requestAnimationFrame(loop);
+        };
+        raf = requestAnimationFrame(loop);
+      });
+    } else {
+      let acc = 0;
+      const startIdx = (i) => { seqIndex = i; const c = state.clips[i]; c._done = false; seekTo(c, c.trimStart); c.video.play().catch(() => {}); };
+      startIdx(0);
+      await new Promise((resolve) => {
+        const loop = async () => {
+          if (cancelled) { resolve(); return; }
+          composite(true);
+          const c = state.clips[seqIndex];
+          if (c && (c.video.currentTime >= c.trimEnd - 0.03 || c.video.ended)) {
+            c.video.pause(); acc += clipDur(c);
+            if (seqIndex + 1 < state.clips.length) startIdx(seqIndex + 1);
+            else { await onFrame(acc); resolve(); return; }
+          }
+          const inClip = c ? clamp(c.video.currentTime - c.trimStart, 0, clipDur(c)) : 0;
+          await onFrame(acc + inClip);
+          raf = requestAnimationFrame(loop);
+        };
+        raf = requestAnimationFrame(loop);
+      });
+    }
+    stop();
+  })();
+  return { promise, cancel: () => { cancelled = true; }, stop };
+}
+
+// Mezcla el audio de todos los clips (con recorte, volumen y orden) fuera de línea
+async function renderMixedAudio(sampleRate, channels) {
+  const total = totalDuration();
+  if (total <= 0) return null;
+  const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  if (!OAC) return null;
+  const oac = new OAC(channels, Math.max(1, Math.ceil(total * sampleRate)), sampleRate);
+  const clips = state.mode === 'collage' ? activeCollageClips() : state.clips;
+  let any = false;
+  for (let i = 0; i < clips.length; i++) {
+    const clip = clips[i];
+    let buf;
+    try { const ab = await clip.file.arrayBuffer(); buf = await oac.decodeAudioData(ab.slice(0)); }
+    catch (_) { continue; }
+    any = true;
+    const src = oac.createBufferSource(); src.buffer = buf;
+    const g = oac.createGain(); g.gain.value = clip.volume;
+    src.connect(g).connect(oac.destination);
+    let when = 0;
+    if (state.mode === 'sequence') for (let k = 0; k < i; k++) when += clipDur(clips[k]);
+    const offset = Math.min(clip.trimStart, buf.duration);
+    const dur = Math.min(clipDur(clip), Math.max(0, buf.duration - offset));
+    if (dur > 0) { try { src.start(when, offset, dur); } catch (_) {} }
+  }
+  if (!any) return null;
+  return await oac.startRendering();
+}
+
+async function encodeAudioBuffer(aenc, rendered) {
+  const sr = rendered.sampleRate, chans = rendered.numberOfChannels, len = rendered.length;
+  const chData = [];
+  for (let c = 0; c < chans; c++) chData.push(rendered.getChannelData(c));
+  const CH = 1024;
+  let pos = 0;
+  while (pos < len) {
+    const n = Math.min(CH, len - pos);
+    const data = new Float32Array(n * chans);
+    for (let c = 0; c < chans; c++) data.set(chData[c].subarray(pos, pos + n), c * n);
+    const ad = new AudioData({ format: 'f32-planar', sampleRate: sr, numberOfFrames: n, numberOfChannels: chans, timestamp: Math.round(pos / sr * 1e6), data });
+    aenc.encode(ad); ad.close();
+    pos += n;
+  }
+}
+
+async function exportWithWebCodecs(vcfg, acfg, opts) {
+  const { onProgress, isCancelled, setInner } = opts;
+  const W = canvas.width, H = canvas.height, fps = 30;
+  const q = parseFloat($('qualitySel').value);
+  const bitrate = Math.max(1e6, Math.round(W * H * fps * 0.08 * q));
+  const { Muxer, ArrayBufferTarget } = window.Mp4Muxer;
+
+  // audio primero (para saber si lo incluimos)
+  let rendered = null;
+  if (acfg) { try { rendered = await renderMixedAudio(acfg.sampleRate, acfg.channels); } catch (_) {} }
+  const target = new ArrayBufferTarget();
+  const muxer = new Muxer({
+    target,
+    video: { codec: vcfg.muxerCodec, width: W, height: H, frameRate: fps },
+    audio: rendered ? { codec: acfg.muxerCodec, numberOfChannels: rendered.numberOfChannels, sampleRate: rendered.sampleRate } : undefined,
+    fastStart: 'in-memory',
+  });
+
+  let encErr = null;
+  const venc = new VideoEncoder({ output: (chunk, meta) => muxer.addVideoChunk(chunk, meta), error: (e) => { encErr = e; } });
+  venc.configure({ codec: vcfg.codec, width: W, height: H, bitrate, framerate: fps, latencyMode: 'quality' });
+
+  if (rendered) {
+    const aenc = new AudioEncoder({ output: (chunk, meta) => muxer.addAudioChunk(chunk, meta), error: (e) => { encErr = e; } });
+    aenc.configure({ codec: acfg.codec, sampleRate: rendered.sampleRate, numberOfChannels: rendered.numberOfChannels, bitrate: 128000 });
+    await encodeAudioBuffer(aenc, rendered);
+    await aenc.flush();
+  }
+
+  const total = totalDuration();
+  let lastFrame = -1;
+  const job = runExportPlayback(async (t) => {
+    onProgress(t, total);
+    const idx = Math.floor(t * fps);
+    if (idx > lastFrame && !isCancelled()) {
+      let guard = 0;
+      while (venc.encodeQueueSize > 6 && guard++ < 500) await new Promise(r => setTimeout(r, 4));
+      const frame = new VideoFrame(canvas, { timestamp: Math.round(idx * 1e6 / fps), duration: Math.round(1e6 / fps) });
+      try { venc.encode(frame, { keyFrame: idx % 60 === 0 }); } catch (_) {}
+      frame.close();
+      lastFrame = idx;
+    }
+  });
+  setInner(job);
+  await job.promise;
+  if (isCancelled()) { try { venc.close(); } catch (_) {} return null; }
+  await venc.flush();
+  muxer.finalize();
+  if (encErr) throw encErr;
+  return new Blob([target.buffer], { type: 'video/mp4' });
+}
+
+async function exportWithMediaRecorder(opts) {
+  const { onProgress, isCancelled, setInner } = opts;
+  const fps = 30;
+  const stream = canvas.captureStream(fps);
+  if (audio.recordDest) audio.recordDest.stream.getAudioTracks().forEach(t => stream.addTrack(t));
+  const mime = pickMime();
+  const q = parseFloat($('qualitySel').value);
+  const bitrate = Math.round(canvas.width * canvas.height * fps * 0.12 * q);
+  let recorder;
+  try { recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: bitrate }); }
+  catch (_) { return null; }
+  const chunks = [];
+  recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+  const stopped = new Promise(res => { recorder.onstop = res; });
+  const recordStart = performance.now();
+  recorder.start(100);
+  const total = totalDuration();
+  const job = runExportPlayback(async (t) => onProgress(t, total));
+  setInner(job);
+  await job.promise;
+  try { recorder.stop(); } catch (_) {}
+  await stopped;
+  if (isCancelled()) return null;
+  let blob = new Blob(chunks, { type: (mime.split(';')[0]) || 'video/webm' });
+  const durMs = performance.now() - recordStart;
+  if (blob.type.includes('webm') && typeof fixWebmDuration === 'function') {
+    try { blob = await fixWebmDuration(blob, durMs); } catch (_) {}
+  }
+  return blob;
+}
+
+function downloadBlob(blob) {
+  const ext = blob.type.includes('mp4') ? 'mp4' : 'webm';
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `clipmix-${Date.now()}.${ext}`; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
 async function exportVideo() {
@@ -834,96 +1074,51 @@ async function exportVideo() {
 
   const statusEl = $('exportStatus'), barEl = $('exportBar'), textEl = $('exportText');
   statusEl.hidden = false; barEl.style.width = '0%'; textEl.textContent = 'Preparando…';
+  $('exportCancelBtn').hidden = false;
 
   ensureAudioGraph();
   state.clips.forEach(ensureClipNodes);
   if (audio.ctx) await audio.ctx.resume().catch(() => {});
 
-  const fps = 30;
-  const canvasStream = canvas.captureStream(fps);
-  if (audio.recordDest) audio.recordDest.stream.getAudioTracks().forEach(t => canvasStream.addTrack(t));
+  // exportamos siempre a resolución completa (aunque la edición use proxy)
+  const restoreProxy = beginFullResForExport();
 
-  const mime = pickMime();
-  const q = parseFloat($('qualitySel').value);
-  const bitrate = Math.round(canvas.width * canvas.height * fps * 0.12 * q);
-
-  let recorder;
-  try {
-    recorder = new MediaRecorder(canvasStream, { mimeType: mime, videoBitsPerSecond: bitrate });
-  } catch (err) {
-    finishExport();
-    alert('Tu navegador no soporta la grabación de video (MediaRecorder). Usa Chrome/Edge actualizado.');
-    return;
-  }
-
-  const chunks = [];
-  let recordStart = 0;
-  recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
-  recorder.onstop = async () => {
-    let blob = new Blob(chunks, { type: (mime.split(';')[0]) || 'video/webm' });
-    // Arreglar la duración del .webm para que se reproduzca completo (IG, etc.)
-    const durMs = recordStart ? (performance.now() - recordStart) : totalDuration() * 1000;
-    if (blob.type.includes('webm') && typeof fixWebmDuration === 'function') {
-      textEl.textContent = 'Finalizando…';
-      try { blob = await fixWebmDuration(blob, durMs); } catch (_) {}
-    }
-    const ext = blob.type.includes('mp4') ? 'mp4' : 'webm';
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `clipmix-${Date.now()}.${ext}`; a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 4000);
-    textEl.textContent = '¡Listo! Video descargado.';
-    finishExport();
-  };
-
-  const total = totalDuration();
-  let renderLoop = null;
-  function finishExport() {
-    state.exporting = false;
-    if (renderLoop) cancelAnimationFrame(renderLoop);
-    state.clips.forEach(c => c.video.pause());
-    updateControls();
-    setTimeout(() => { statusEl.hidden = true; renderStatic(); }, 2500);
-  }
-  const progress = (t) => {
+  let cancelled = false, lastProgress = performance.now();
+  const onProgress = (t, total) => {
+    lastProgress = performance.now();
     barEl.style.width = Math.min(100, (t / total) * 100) + '%';
-    textEl.textContent = `Grabando… ${fmtTime(t)} / ${fmtTime(total)}`;
+    textEl.textContent = `Exportando… ${fmtTime(t)} / ${fmtTime(total)}`;
   };
+  const isCancelled = () => cancelled;
+  exportJob = { cancel: () => { cancelled = true; if (exportJob._inner) exportJob._inner.cancel(); }, _inner: null };
+  const setInner = (j) => { exportJob._inner = j; };
 
-  recorder.start(100);
-  recordStart = performance.now();
+  // watchdog: si no hay progreso por 15s, cancela para no quedar trabado
+  const watchdog = setInterval(() => {
+    if (performance.now() - lastProgress > 15000) { cancelled = true; if (exportJob._inner) exportJob._inner.cancel(); }
+  }, 3000);
 
-  if (state.mode === 'collage') {
-    const active = activeCollageClips();
-    active.forEach(c => { c._done = false; seekTo(c, c.trimStart); });
-    await Promise.all(active.map(c => c.video.play().catch(() => {})));
-    renderLoop = requestAnimationFrame(function draw() {
-      composite(true);
-      active.forEach(c => {
-        if (!c._done && (c.video.currentTime >= c.trimEnd - 0.03 || c.video.ended)) { c.video.pause(); c._done = true; }
-      });
-      progress(Math.max(0, ...active.map(c => clamp(c.video.currentTime - c.trimStart, 0, clipDur(c)))));
-      if (active.every(c => c._done)) { recorder.stop(); return; }
-      renderLoop = requestAnimationFrame(draw);
-    });
-  } else {
-    let done = 0;
-    const startIdx = (i) => { seqIndex = i; const c = state.clips[i]; c._done = false; seekTo(c, c.trimStart); c.video.play().catch(() => {}); };
-    startIdx(0);
-    renderLoop = requestAnimationFrame(function draw() {
-      composite(true);
-      const c = state.clips[seqIndex];
-      if (c && (c.video.currentTime >= c.trimEnd - 0.03 || c.video.ended)) {
-        c.video.pause();
-        done += clipDur(c);
-        if (seqIndex + 1 < state.clips.length) startIdx(seqIndex + 1);
-        else { recorder.stop(); return; }
-      }
-      const inClip = c ? clamp(c.video.currentTime - c.trimStart, 0, clipDur(c)) : 0;
-      progress(done + inClip);
-      renderLoop = requestAnimationFrame(draw);
-    });
-  }
+  let blob = null, error = null;
+  try {
+    const method = await chooseExportMethod();
+    const opts = { onProgress, isCancelled, setInner };
+    if (method.type === 'webcodecs') blob = await exportWithWebCodecs(method.video, method.audio, opts);
+    else blob = await exportWithMediaRecorder(opts);
+  } catch (e) { error = e; console.error('export error', e); }
+
+  clearInterval(watchdog);
+  restoreProxy();
+
+  if (cancelled && !blob) textEl.textContent = 'Exportación cancelada.';
+  else if (error || !blob) textEl.textContent = 'Hubo un problema al exportar. Prueba de nuevo o baja la calidad.';
+  else { downloadBlob(blob); textEl.textContent = '¡Listo! Video descargado.'; }
+
+  state.exporting = false;
+  exportJob = null;
+  $('exportCancelBtn').hidden = true;
+  state.clips.forEach(c => c.video.pause());
+  updateControls();
+  setTimeout(() => { statusEl.hidden = true; renderStatic(); }, 2600);
 }
 
 // ---------- Constructor de presets ----------
@@ -1206,10 +1401,16 @@ function loadSettings() {
     const s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
     if (s.frameColor) state.frameColor = s.frameColor;
     if (typeof s.frameWidth === 'number') state.frameWidth = s.frameWidth;
+    if (typeof s.proxy === 'boolean') state.proxy = s.proxy;
   } catch (_) {}
 }
 function saveSettings() {
-  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ frameColor: state.frameColor, frameWidth: state.frameWidth })); } catch (_) {}
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ frameColor: state.frameColor, frameWidth: state.frameWidth, proxy: state.proxy })); } catch (_) {}
+}
+function initProxyToggle() {
+  const t = $('proxyToggle');
+  t.checked = state.proxy;
+  t.addEventListener('change', () => { state.proxy = t.checked; applyFormat(); saveSettings(); });
 }
 function buildSwatches() {
   const w = $('frameSwatches');
@@ -1283,6 +1484,51 @@ function commit() {
   if (history.length > HIST_MAX) history.shift();
   histIndex = history.length - 1;
   updateUndoButtons();
+  saveProjectSoon();
+}
+
+// ---------- Autoguardado / restauración ----------
+const PROJECT_KEY = 'clipmix_project_v1';
+let saveTimer = null;
+function saveProjectSoon() { clearTimeout(saveTimer); saveTimer = setTimeout(saveProjectNow, 500); }
+function saveProjectNow() {
+  const meta = {
+    clips: state.clips.map(c => ({ id: c.id, name: c.name, trimStart: c.trimStart, trimEnd: c.trimEnd, volume: c.volume, transform: { ...c.transform } })),
+    texts: state.texts.map(t => ({ ...t })),
+    mode: state.mode, layout: state.layout, format: state.format,
+    frameColor: state.frameColor, frameWidth: state.frameWidth,
+    selectedId: state.selectedId, selectedTextId: state.selectedTextId,
+  };
+  try { localStorage.setItem(PROJECT_KEY, JSON.stringify(meta)); } catch (_) {}
+}
+async function saveClipBlob(clip) { try { await clipStore.put('clip_' + clip.id, clip.file); } catch (_) {} }
+async function delClipBlob(id) { try { await clipStore.del('clip_' + id); } catch (_) {} }
+
+async function restoreProject() {
+  let meta;
+  try { meta = JSON.parse(localStorage.getItem(PROJECT_KEY) || 'null'); } catch (_) { meta = null; }
+  if (!meta || !meta.clips || !meta.clips.length || !window.clipStore) return false;
+  const ordered = [];
+  for (const cm of meta.clips) {
+    let file;
+    try { file = await clipStore.get('clip_' + cm.id); } catch (_) {}
+    if (!file) continue;
+    const clip = makeClip(file, { restore: true, id: cm.id, trimStart: cm.trimStart, trimEnd: cm.trimEnd, volume: cm.volume, transform: cm.transform });
+    clip.name = cm.name || clip.name;
+    ordered.push(clip);
+  }
+  if (!ordered.length) return false;
+  state.clips = ordered; // respetar el orden guardado
+  state.texts = (meta.texts || []).map(t => ({ ...t }));
+  state.mode = meta.mode || state.mode;
+  if (LAYOUTS[meta.layout]) state.layout = meta.layout;
+  if (FORMATS[meta.format]) state.format = meta.format;
+  if (meta.frameColor) state.frameColor = meta.frameColor;
+  if (typeof meta.frameWidth === 'number') state.frameWidth = meta.frameWidth;
+  state.selectedId = state.clips.find(c => c.id === meta.selectedId) ? meta.selectedId : (state.clips[0]?.id ?? null);
+  state.selectedTextId = state.texts.find(t => t.id === meta.selectedTextId) ? meta.selectedTextId : null;
+  nextTextId = Math.max(nextTextId, ...state.texts.map(t => (t.id || 0) + 1), 1);
+  return true;
 }
 
 function applySnapshot(s) {
@@ -1352,14 +1598,22 @@ document.addEventListener('change', (e) => {
 // ---------- Arranque ----------
 window.addEventListener('resize', () => applyFormat());
 window.addEventListener('orientationchange', () => setTimeout(applyFormat, 200));
-loadSettings();
-loadPresets();
-buildLayoutTiles();
-buildFormatTiles();
-initFrameControls();
-renderTextList();
-applyFormat();
-renderStatic();
-updateControls();
-commit();            // estado inicial en el historial
-updateUndoButtons();
+
+async function init() {
+  loadSettings();
+  loadPresets();
+  try { await restoreProject(); } catch (_) {}
+  buildLayoutTiles();
+  buildFormatTiles();
+  initFrameControls();
+  initProxyToggle();
+  syncModeUI();
+  renderClipList();
+  renderTextList();
+  updateControls();
+  applyFormat();
+  renderStatic();
+  commit();            // estado inicial en el historial
+  updateUndoButtons();
+}
+init();

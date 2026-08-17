@@ -95,6 +95,11 @@
 
       <div class="opt-group">
         <h3>Exportar</h3>
+        <label class="row switch-row">
+          <span>Edición ligera (proxy)</span>
+          <input id="proxyToggle" type="checkbox" checked />
+        </label>
+        <p class="hint" style="margin-top:0">La vista previa se ve a menor resolución para ir fluido; el video se exporta igual en alta calidad.</p>
         <label class="row">
           <span>Calidad</span>
           <select id="qualitySel">
@@ -107,6 +112,7 @@
         <div id="exportStatus" class="export-status" hidden>
           <div class="bar"><div id="exportBar" class="bar-fill"></div></div>
           <span id="exportText">Preparando…</span>
+          <button id="exportCancelBtn" class="btn small" hidden>Cancelar</button>
         </div>
         <p id="exportWarn" class="hint warn" hidden></p>
       </div>
@@ -142,7 +148,9 @@
     <button class="tab" data-tab="editar">🎛️<span>Editar</span></button>
   </nav>
 
+  <script src="vendor/mp4-muxer.js"></script>
   <script src="webm-duration.js"></script>
+  <script src="store.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
