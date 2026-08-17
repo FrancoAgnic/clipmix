@@ -9,6 +9,8 @@ App web para hacer **collages de video**: junta varios videos en uno solo y exp�
 - **Recorte por clip** — elige desde dónde empieza y dónde termina cada video (in/out).
 - **Volumen por clip** — sube o baja el audio de cada video por separado (0–150%).
 - **Encuadre manual** — mueve, escala y rota cada video dentro de su celda: arrastra en la vista previa (o pellizca con dos dedos para escalar/rotar), o usa los sliders del editor ⚙.
+- **Textos con temporización** — añade uno o varios textos; para cada uno eliges **cuándo aparece** (segundo) y **cuánto dura**, además de posición (arrastrando), tamaño, color y negrita. Ideal para listas en secuencia (“1 Desayuné”, “2 Gym”…).
+- **Marco configurable** — color (paleta + selector libre) y grosor de las líneas de la cuadrícula.
 - **Presets de cuadrícula propios** — crea tus propias grillas (filas × columnas), ponles nombre y guárdalas; quedan disponibles siempre.
 - **Formatos** — 16:9, 9:16 (vertical), 1:1 (cuadrado), 4:5 (retrato), 4:3.
 - **Exportar** — genera un solo archivo de video (`.mp4` o `.webm` según el navegador) con audio mezclado.

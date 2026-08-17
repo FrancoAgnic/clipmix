@@ -15,9 +15,12 @@ const state = {
   selectedId: null,     // clip seleccionado para encuadrar
   frameColor: '#ffffff',// color del marco de la cuadrícula
   frameWidth: 0.8,      // grosor del marco (% del lado menor). 0 = sin marco
+  texts: [],            // {id, content, start, duration, x, y, size, color, bold}
+  selectedTextId: null, // texto seleccionado (para mover/editar)
 };
 
 let nextId = 1;
+let nextTextId = 1;
 let seqIndex = 0;
 
 // ---------- Definiciones ----------
@@ -210,6 +213,7 @@ function addClip(file) {
     if (state.selectedId == null) state.selectedId = clip.id;
     try { video.currentTime = 0; } catch (_) {}
     renderClipList();
+    renderTextList();
     updateControls();
     renderStatic();
   };
@@ -547,8 +551,13 @@ function composite(forExport) {
     }
   }
 
-  // 3) resaltado del clip seleccionado (no se graba al exportar)
-  if (!forExport) {
+  const paused = !state.playing && !state.exporting;
+
+  // 3) textos (respetan su tiempo; en pausa se muestra el seleccionado para editarlo)
+  drawTexts(paused);
+
+  // 4) resaltado del clip seleccionado (solo si NO hay un texto seleccionado; no se graba)
+  if (!forExport && !state.selectedTextId) {
     rects.forEach(({ i, dx, dy, dw, dh }) => {
       const clip = state.clips[i];
       if (clip && clip.id === state.selectedId) {
@@ -558,6 +567,20 @@ function composite(forExport) {
         ctx.strokeRect(dx + lw / 2, dy + lw / 2, dw - lw, dh - lw);
       }
     });
+  }
+
+  // 5) contorno del texto seleccionado (guía para moverlo; no se graba)
+  if (!forExport && state.selectedTextId) {
+    const tx = selectedText();
+    if (tx) {
+      const bb = textBBox(tx);
+      const pad = W * 0.015;
+      ctx.strokeStyle = '#34d399';
+      ctx.setLineDash([W * 0.012, W * 0.012]);
+      ctx.lineWidth = Math.max(2, W * 0.003);
+      ctx.strokeRect(bb.left - pad, bb.top - pad, bb.w + pad * 2, bb.h + pad * 2);
+      ctx.setLineDash([]);
+    }
   }
 }
 
@@ -569,7 +592,7 @@ function renderStatic() {
 
 // ---------- Gestos de encuadre en el canvas ----------
 const pointers = new Map();
-let panLast = null, pinch = null;
+let panLast = null, pinch = null, textDrag = false;
 
 canvas.addEventListener('pointerdown', (e) => {
   if (state.exporting) return;
@@ -578,19 +601,27 @@ canvas.addEventListener('pointerdown', (e) => {
   pointers.set(e.pointerId, p);
 
   if (pointers.size === 1) {
+    // ¿hay un texto seleccionado y tocamos sobre él? -> mover texto
+    const tx = selectedText();
+    if (tx && hitText(tx, p)) { textDrag = true; panLast = p; return; }
+    // si había un texto seleccionado y tocamos fuera, lo deseleccionamos
+    if (state.selectedTextId) { state.selectedTextId = null; renderTextList(); }
     const hit = cellAtPoint(p.x, p.y);
     if (hit && state.clips[hit.i]) selectClip(state.clips[hit.i].id);
     panLast = p;
   } else if (pointers.size === 2) {
-    panLast = null;
+    panLast = null; textDrag = false;
     const pts = [...pointers.values()];
-    const clip = selectedClip();
-    pinch = {
-      dist: dist(pts[0], pts[1]),
-      ang: angle(pts[0], pts[1]),
-      scale: clip ? clip.transform.scale : 1,
-      rot: clip ? clip.transform.rot : 0,
-    };
+    const tx = selectedText();
+    if (tx) {
+      pinch = { text: true, dist: dist(pts[0], pts[1]), size: tx.size };
+    } else {
+      const clip = selectedClip();
+      pinch = {
+        text: false, dist: dist(pts[0], pts[1]), ang: angle(pts[0], pts[1]),
+        scale: clip ? clip.transform.scale : 1, rot: clip ? clip.transform.rot : 0,
+      };
+    }
   }
 });
 
@@ -598,10 +629,30 @@ canvas.addEventListener('pointermove', (e) => {
   if (!pointers.has(e.pointerId)) return;
   const p = canvasPoint(e);
   pointers.set(e.pointerId, p);
+
+  // mover el texto seleccionado (un dedo)
+  if (pointers.size === 1 && textDrag) {
+    const tx = selectedText();
+    if (tx && panLast) {
+      tx.x = clamp(tx.x + (p.x - panLast.x) / canvas.width, 0, 1);
+      tx.y = clamp(tx.y + (p.y - panLast.y) / canvas.height, 0, 1);
+      panLast = p;
+      if (!state.playing) renderStatic();
+    }
+    return;
+  }
+
+  if (pointers.size === 2 && pinch && pinch.text) {
+    const pts = [...pointers.values()];
+    const tx = selectedText();
+    if (tx) { tx.size = clamp(pinch.size * (dist(pts[0], pts[1]) / pinch.dist), 2, 40); syncTextSize(tx); if (!state.playing) renderStatic(); }
+    return;
+  }
+
+  // encuadre del clip
   const clip = selectedClip();
   if (!clip) return;
-
-  if (pointers.size === 1 && panLast) {
+  if (pointers.size === 1 && panLast && !state.selectedTextId) {
     const rect = selectedCellRect();
     if (rect) {
       clip.transform.x += (p.x - panLast.x) / rect.dw;
@@ -609,7 +660,7 @@ canvas.addEventListener('pointermove', (e) => {
     }
     panLast = p;
     if (!state.playing) renderStatic();
-  } else if (pointers.size === 2 && pinch) {
+  } else if (pointers.size === 2 && pinch && !pinch.text) {
     const pts = [...pointers.values()];
     const d = dist(pts[0], pts[1]);
     const a = angle(pts[0], pts[1]);
@@ -623,7 +674,7 @@ canvas.addEventListener('pointermove', (e) => {
 function endPointer(e) {
   pointers.delete(e.pointerId);
   if (pointers.size < 2) pinch = null;
-  if (pointers.size === 0) panLast = null;
+  if (pointers.size === 0) { panLast = null; textDrag = false; }
 }
 canvas.addEventListener('pointerup', endPointer);
 canvas.addEventListener('pointercancel', endPointer);
@@ -878,6 +929,185 @@ function savePresetFromBuilder() {
   renderStatic();
 }
 
+// ---------- Textos ----------
+function selectedText() { return state.texts.find(t => t.id === state.selectedTextId) || null; }
+
+function drawOneText(c, tx) {
+  const W = canvas.width, H = canvas.height;
+  const fs = Math.max(8, H * (tx.size / 100));
+  c.save();
+  c.font = `${tx.bold ? '700 ' : '400 '}${fs}px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
+  c.textAlign = 'center';
+  c.textBaseline = 'middle';
+  c.lineJoin = 'round';
+  const lines = (tx.content || '').split('\n');
+  const lh = fs * 1.2;
+  const cx = tx.x * W, cy = tx.y * H;
+  const startY = cy - (lines.length - 1) * lh / 2;
+  lines.forEach((ln, i) => {
+    const y = startY + i * lh;
+    c.lineWidth = Math.max(2, fs * 0.16);
+    c.strokeStyle = 'rgba(0,0,0,.78)';   // contorno para legibilidad sobre el video
+    c.strokeText(ln, cx, y);
+    c.fillStyle = tx.color;
+    c.fillText(ln, cx, y);
+  });
+  c.restore();
+}
+
+function textBBox(tx) {
+  const W = canvas.width, H = canvas.height;
+  const fs = Math.max(8, H * (tx.size / 100));
+  ctx.save();
+  ctx.font = `${tx.bold ? '700 ' : '400 '}${fs}px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
+  const lines = (tx.content || ' ').split('\n');
+  let maxw = 0;
+  lines.forEach(l => { maxw = Math.max(maxw, ctx.measureText(l || ' ').width); });
+  ctx.restore();
+  const lh = fs * 1.2;
+  const h = Math.max(lh, lines.length * lh);
+  const cx = tx.x * W, cy = tx.y * H;
+  return { cx, cy, w: maxw, h, left: cx - maxw / 2, top: cy - h / 2 };
+}
+
+function hitText(tx, p) {
+  const bb = textBBox(tx);
+  const pad = canvas.width * 0.03;
+  return p.x >= bb.left - pad && p.x <= bb.left + bb.w + pad && p.y >= bb.top - pad && p.y <= bb.top + bb.h + pad;
+}
+
+function drawTexts(paused) {
+  if (!state.texts.length) return;
+  const t = currentTime();
+  state.texts.forEach(tx => {
+    const visible = t >= tx.start && t < tx.start + tx.duration;
+    if (visible || (paused && tx.id === state.selectedTextId)) drawOneText(ctx, tx);
+  });
+}
+
+function addText() {
+  const t = {
+    id: nextTextId++, content: 'Escribe aquí', start: 0,
+    duration: Math.min(3, Math.max(1, Math.ceil(totalDuration()) || 3)),
+    x: 0.5, y: 0.85, size: 7, color: '#ffffff', bold: true,
+  };
+  state.texts.push(t);
+  state.selectedTextId = t.id;
+  renderTextList();
+  renderStatic();
+}
+function removeText(id) {
+  const i = state.texts.findIndex(t => t.id === id);
+  if (i < 0) return;
+  state.texts.splice(i, 1);
+  if (state.selectedTextId === id) state.selectedTextId = null;
+  renderTextList();
+  renderStatic();
+}
+function selectText(id) {
+  state.selectedTextId = id;
+  renderTextList();
+  renderStatic();
+}
+
+function renderTextList() {
+  const list = $('textList');
+  list.innerHTML = '';
+  const maxT = Math.max(5, Math.ceil(totalDuration()));
+  state.texts.forEach((tx, i) => {
+    const li = document.createElement('li');
+    li.className = 'text-item' + (tx.id === state.selectedTextId ? ' selected' : '');
+    li.dataset.id = tx.id;
+
+    const head = document.createElement('div');
+    head.className = 'text-head';
+    const badge = document.createElement('span');
+    badge.className = 'text-badge';
+    badge.textContent = i + 1;
+    const title = document.createElement('div');
+    title.className = 'text-title';
+    title.textContent = (tx.content.split('\n')[0] || '(vacío)').slice(0, 22) || '(vacío)';
+    title.onclick = () => selectText(tx.id);
+    const time = document.createElement('span');
+    time.className = 'text-time';
+    time.textContent = `${tx.start.toFixed(1)}s · ${tx.duration.toFixed(1)}s`;
+    const rm = document.createElement('button');
+    rm.className = 'rm';
+    rm.textContent = '✕';
+    rm.onclick = () => removeText(tx.id);
+    head.appendChild(badge);
+    head.appendChild(title);
+    head.appendChild(time);
+    head.appendChild(rm);
+    li.appendChild(head);
+
+    if (tx.id === state.selectedTextId) li.appendChild(buildTextEditor(tx, title, time, maxT));
+    list.appendChild(li);
+  });
+}
+
+function buildTextEditor(tx, titleEl, timeEl, maxT) {
+  const box = document.createElement('div');
+  box.className = 'text-editor';
+
+  const ta = document.createElement('textarea');
+  ta.className = 'text-input textarea';
+  ta.rows = 2;
+  ta.value = tx.content;
+  ta.placeholder = 'Tu texto… (Enter para varias líneas)';
+  ta.addEventListener('input', () => {
+    tx.content = ta.value;
+    titleEl.textContent = (tx.content.split('\n')[0] || '(vacío)').slice(0, 22) || '(vacío)';
+    renderStatic();
+  });
+  box.appendChild(ta);
+
+  const startRow = sliderRow('Aparece', 0, maxT, 0.1, tx.start, (v) => {
+    tx.start = v; startRow.val.textContent = v.toFixed(1) + 's';
+    timeEl.textContent = `${tx.start.toFixed(1)}s · ${tx.duration.toFixed(1)}s`;
+    renderStatic();
+  }, tx.start.toFixed(1) + 's');
+
+  const durRow = sliderRow('Dura', 0.2, maxT, 0.1, tx.duration, (v) => {
+    tx.duration = v; durRow.val.textContent = v.toFixed(1) + 's';
+    timeEl.textContent = `${tx.start.toFixed(1)}s · ${tx.duration.toFixed(1)}s`;
+    renderStatic();
+  }, tx.duration.toFixed(1) + 's');
+
+  const sizeRow = sliderRow('Tamaño', 2, 20, 0.5, tx.size, (v) => {
+    tx.size = v; sizeRow.val.textContent = v.toFixed(1);
+    renderStatic();
+  }, tx.size.toFixed(1));
+  sizeRow.input.classList.add('txt-size');
+
+  box.appendChild(startRow.el);
+  box.appendChild(durRow.el);
+  box.appendChild(sizeRow.el);
+
+  // color + negrita
+  const styleRow = document.createElement('div');
+  styleRow.className = 'text-style-row';
+  const color = document.createElement('input');
+  color.type = 'color'; color.value = tx.color; color.title = 'Color del texto';
+  color.addEventListener('input', () => { tx.color = color.value; renderStatic(); });
+  const bold = document.createElement('button');
+  bold.className = 'btn small bold-toggle' + (tx.bold ? ' on' : '');
+  bold.textContent = 'Negrita';
+  bold.onclick = () => { tx.bold = !tx.bold; bold.classList.toggle('on', tx.bold); renderStatic(); };
+  styleRow.appendChild(color);
+  styleRow.appendChild(bold);
+  box.appendChild(styleRow);
+
+  return box;
+}
+
+function syncTextSize(tx) {
+  const inp = document.querySelector(`.text-item[data-id="${tx.id}"] .txt-size`);
+  if (inp) { inp.value = tx.size; inp.nextElementSibling.textContent = tx.size.toFixed(1); }
+}
+
+$('addTextBtn').addEventListener('click', addText);
+
 // ---------- Pestañas (móvil) ----------
 document.querySelector('.tabbar').addEventListener('click', (e) => {
   const btn = e.target.closest('.tab');
@@ -1000,6 +1230,7 @@ loadPresets();
 buildLayoutTiles();
 buildFormatTiles();
 initFrameControls();
+renderTextList();
 applyFormat();
 renderStatic();
 updateControls();
