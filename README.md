@@ -5,6 +5,7 @@ App web para hacer **collages de video**: junta varios videos en uno solo y exp�
 ## Qué hace
 
 - **Modo Cuadrícula** — varios videos se reproducen *al mismo tiempo* en una grilla (2 columnas, 2 filas, 3, 2×2, 1+2…). Estilo pantalla dividida.
+- **Efectos / plantillas animadas** (para trends de IG): Zoom lento (Ken Burns), Entrada, Beat, Ola, Balanceo, Parallax, Foco rotativo y **Cambia videos** (las celdas van rotando qué video muestran) — con control de velocidad. Se ven en la vista previa y quedan grabados al exportar.
 - **Modo Secuencia** — los videos se unen *uno tras otro* para formar un video más largo.
 - **Recorte por clip** — elige desde dónde empieza y dónde termina cada video (in/out).
 - **Volumen por clip** — sube o baja el audio de cada video por separado (0–150%).

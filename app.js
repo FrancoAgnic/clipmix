@@ -18,6 +18,8 @@ const state = {
   texts: [],            // {id, content, start, duration, x, y, size, color, bold}
   selectedTextId: null, // texto seleccionado (para mover/editar)
   proxy: true,          // edición ligera (baja resolución); export siempre en alta
+  template: 'none',     // plantilla de efectos/transiciones del collage
+  templateSpeed: 1,     // velocidad de la animación
 };
 
 let nextId = 1;
@@ -56,7 +58,8 @@ function currentCells() {
   return state.mode === 'collage' ? (LAYOUTS[state.layout]?.cells || [[0,0,1,1]]) : [[0,0,1,1]];
 }
 function activeCollageClips() {
-  return state.clips.slice(0, currentCells().length);
+  // La plantilla "Cambia videos" usa todos los clips; el resto, solo los de las celdas.
+  return templateDef().usesAll ? state.clips.slice() : state.clips.slice(0, currentCells().length);
 }
 
 // ---------- Presets personalizados ----------
@@ -112,6 +115,60 @@ function layoutSVG(def) {
     `<rect class="cell" x="${2 + x * 30}" y="${2 + y * 22}" width="${Math.max(1, w * 30)}" height="${Math.max(1, h * 22)}" rx="1.5"/>`
   ).join('');
   return `<svg viewBox="0 0 34 26">${rects}</svg>`;
+}
+
+// ----- Plantillas de efectos: UI + animación en vivo -----
+function buildTemplateTiles() {
+  const grid = $('templateGrid');
+  grid.innerHTML = '';
+  TEMPLATE_ORDER.forEach(key => {
+    const def = TEMPLATES[key];
+    const tile = document.createElement('button');
+    tile.className = 'opt-tile' + (key === state.template ? ' active' : '');
+    tile.dataset.template = key;
+    tile.innerHTML = `<span class="tmpl-ico">${def.icon}</span><span>${def.name}</span>`;
+    tile.onclick = () => { state.template = key; refreshTemplateTiles(); renderStatic(); ensureIdleAnim(); commit(); };
+    grid.appendChild(tile);
+  });
+}
+function refreshTemplateTiles() {
+  document.querySelectorAll('[data-template]').forEach(t => t.classList.toggle('active', t.dataset.template === state.template));
+}
+function refreshTemplateUI() {
+  refreshTemplateTiles();
+  $('templateSpeed').value = state.templateSpeed;
+  $('templateSpeedVal').textContent = state.templateSpeed.toFixed(1) + '×';
+}
+function initTemplateControls() {
+  buildTemplateTiles();
+  const sp = $('templateSpeed');
+  sp.value = state.templateSpeed;
+  $('templateSpeedVal').textContent = state.templateSpeed.toFixed(1) + '×';
+  sp.addEventListener('input', () => {
+    state.templateSpeed = parseFloat(sp.value);
+    $('templateSpeedVal').textContent = state.templateSpeed.toFixed(1) + '×';
+    renderStatic();
+  });
+}
+
+// Tiempo para las plantillas: durante play/export sigue al video; en pausa usa el
+// reloj real para que el efecto se vea moverse en la vista previa.
+function templateTime() {
+  return (state.playing || state.exporting) ? currentTime() : performance.now() / 1000;
+}
+
+// Bucle de animación en reposo: mueve el efecto en la vista previa aunque esté en pausa
+let idleRaf = null;
+function idleActive() {
+  return !state.playing && !state.exporting && state.mode === 'collage' && state.template !== 'none' && state.clips.length > 0;
+}
+function idleAnimTick() {
+  if (!idleActive()) { idleRaf = null; return; }
+  composite(false);
+  idleRaf = requestAnimationFrame(idleAnimTick);
+}
+function ensureIdleAnim() {
+  if (!idleRaf && idleActive()) idleRaf = requestAnimationFrame(idleAnimTick);
 }
 
 function buildFormatTiles() {
@@ -249,6 +306,7 @@ function makeClip(file, opts = {}) {
     renderTextList();
     updateControls();
     renderStatic();
+    ensureIdleAnim();
     if (!opts.restore) { commit(); saveProjectSoon(); saveClipBlob(clip); }
   };
 
@@ -486,6 +544,7 @@ function syncModeUI() {
   document.querySelectorAll('.seg').forEach(s => s.classList.toggle('active', s.dataset.mode === state.mode));
   $('layoutGroup').style.display = state.mode === 'collage' ? 'block' : 'none';
   $('frameGroup').style.display = state.mode === 'collage' ? 'block' : 'none';
+  $('templateGroup').style.display = state.mode === 'collage' ? 'block' : 'none';
   $('modeHint').textContent = state.mode === 'collage'
     ? 'Los videos se reproducen a la vez, uno en cada celda.'
     : 'Los videos se unen uno tras otro en un video más largo.';
@@ -496,6 +555,7 @@ $('modeSeg').addEventListener('click', (e) => {
   state.mode = btn.dataset.mode;
   syncModeUI();
   renderStatic();
+  ensureIdleAnim();
   commit();
 });
 
@@ -558,6 +618,118 @@ function drawClipInCell(c, clip, dx, dy, dw, dh) {
   c.restore();
 }
 
+// ---------- Plantillas de efectos / transiciones (collage animado) ----------
+const _ease = (u) => (u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2);
+const _clamp01 = (u) => Math.max(0, Math.min(1, u));
+const _lerp = (a, b, u) => a + (b - a) * u;
+const _item = (i, c, extra) => Object.assign({ clipIndex: i, x: c[0], y: c[1], w: c[2], h: c[3], scale: 1, rot: 0, alpha: 1, px: 0, py: 0 }, extra);
+
+// Cada plantilla devuelve una lista de "items" a dibujar según el tiempo t (seg).
+const TEMPLATES = {
+  none: {
+    name: 'Ninguno', icon: '▦', usesAll: false,
+    anim: (t, o) => o.cells.map((c, i) => _item(i, c)),
+  },
+  kenburns: {
+    name: 'Zoom lento', icon: '🎞️', usesAll: false,
+    anim: (t, o) => o.cells.map((c, i) => {
+      const ph = t * 0.5 * o.speed + i * 0.8;
+      return _item(i, c, { scale: 1.12 + 0.08 * Math.sin(ph), px: 0.04 * Math.sin(ph * 0.7), py: 0.04 * Math.cos(ph * 0.5) });
+    }),
+  },
+  slidein: {
+    name: 'Entrada', icon: '➡️', usesAll: false,
+    anim: (t, o) => {
+      const p = _ease(_clamp01(t / 0.7));
+      return o.cells.map((c, i) => _item(i, c, { alpha: p, px: (1 - p) * (i % 2 ? 1 : -1), py: 0 }));
+    },
+  },
+  punch: {
+    name: 'Beat', icon: '💥', usesAll: false,
+    anim: (t, o) => {
+      const per = Math.max(0.35, 0.6 / o.speed);
+      const b = Math.max(0, 1 - ((t % per) / per) * 5);
+      const s = 1 + 0.10 * b;
+      return o.cells.map((c, i) => _item(i, c, { scale: s }));
+    },
+  },
+  wave: {
+    name: 'Ola', icon: '🌊', usesAll: false,
+    anim: (t, o) => o.cells.map((c, i) => _item(i, c, { scale: 1 + 0.09 * Math.sin(t * 3 * o.speed - i * 0.9) })),
+  },
+  sway: {
+    name: 'Balanceo', icon: '↔️', usesAll: false,
+    anim: (t, o) => o.cells.map((c, i) => _item(i, c, { scale: 1.08, rot: 4 * Math.sin(t * 1.5 * o.speed + i) })),
+  },
+  parallax: {
+    name: 'Parallax', icon: '🪄', usesAll: false,
+    anim: (t, o) => o.cells.map((c, i) => {
+      const ph = t * 0.6 * o.speed + i, dir = i % 2 ? 1 : -1;
+      return _item(i, c, { scale: 1.12, px: 0.06 * Math.sin(ph) * dir, py: 0.035 * Math.cos(ph) });
+    }),
+  },
+  spotlight: {
+    name: 'Foco', icon: '🔦', usesAll: false,
+    anim: (t, o) => {
+      const cells = o.cells, per = Math.max(0.8, 1.5 / o.speed);
+      const idx = Math.floor(t / per) % cells.length;
+      const local = (t % per) / per;
+      const s = _ease(local < 0.5 ? local * 2 : (1 - local) * 2);
+      const items = [];
+      cells.forEach((c, i) => { if (i !== idx) items.push(_item(i, c, { alpha: 1 - 0.88 * s })); });
+      const c = cells[idx];
+      items.push(_item(idx, [_lerp(c[0], 0.04, s), _lerp(c[1], 0.04, s), _lerp(c[2], 0.92, s), _lerp(c[3], 0.92, s)]));
+      return items;
+    },
+  },
+  shuffle: {
+    name: 'Cambia videos', icon: '🔀', usesAll: true,
+    anim: (t, o) => {
+      const cells = o.cells, n = Math.max(1, o.n), per = Math.max(0.7, 1.4 / o.speed);
+      const step = Math.floor(t / per), local = (t % per) / per;
+      const items = [];
+      cells.forEach((c, i) => {
+        const cur = (i + step) % n;
+        if (local < 0.22 && step > 0) {
+          const a = _ease(local / 0.22);
+          const prev = (i + step - 1 + n) % n;
+          items.push(_item(prev, c, { alpha: 1 - a, scale: 1 + 0.04 * (1 - a) }));
+          items.push(_item(cur, c, { alpha: a, scale: 1 + 0.04 * (1 - a) }));
+        } else {
+          items.push(_item(cur, c));
+        }
+      });
+      return items;
+    },
+  },
+};
+const TEMPLATE_ORDER = ['none', 'kenburns', 'slidein', 'punch', 'wave', 'sway', 'parallax', 'spotlight', 'shuffle'];
+function templateDef() { return TEMPLATES[state.template] || TEMPLATES.none; }
+
+// Dibuja un clip en un rectángulo normalizado con transform propio + animación (scale/rot/alpha/pan)
+function drawClipItem(c, clip, it) {
+  const W = canvas.width, H = canvas.height;
+  const dx = it.x * W, dy = it.y * H, dw = it.w * W, dh = it.h * H;
+  const src = frameSource(clip);
+  c.save();
+  c.globalAlpha = it.alpha != null ? it.alpha : 1;
+  c.beginPath(); c.rect(dx, dy, dw, dh); c.clip();
+  if (!src) { c.fillStyle = '#0c0e12'; c.fillRect(dx, dy, dw, dh); c.restore(); return; }
+  const isVid = src.tagName === 'VIDEO';
+  const vw = (isVid ? src.videoWidth : src.width) || 16;
+  const vh = (isVid ? src.videoHeight : src.height) || 9;
+  const tr = clip.transform;
+  const cx = dx + dw / 2 + (tr.x + (it.px || 0)) * dw;
+  const cy = dy + dh / 2 + (tr.y + (it.py || 0)) * dh;
+  c.translate(cx, cy);
+  const rot = (tr.rot || 0) + (it.rot || 0);
+  if (rot) c.rotate(rot * Math.PI / 180);
+  const base = Math.max(dw / vw, dh / vh) * (tr.scale || 1) * (it.scale || 1);
+  const w = vw * base, h = vh * base;
+  c.drawImage(src, -w / 2, -h / 2, w, h);
+  c.restore();
+}
+
 // Rectángulos de celda en coordenadas del canvas (con el índice de clip que ocupan)
 function cellRects() {
   const W = canvas.width, H = canvas.height;
@@ -572,25 +744,30 @@ function composite(forExport) {
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, W, H);
 
-  const rects = cellRects();
+  const fw = Math.min(W, H) * (state.frameWidth / 100);
 
-  // 1) videos
-  rects.forEach(({ i, dx, dy, dw, dh }) => {
-    const clip = state.clips[i];
-    if (clip) drawClipInCell(ctx, clip, dx, dy, dw, dh);
-    else { ctx.fillStyle = '#0c0e12'; ctx.fillRect(dx, dy, dw, dh); }
-  });
-
-  // 2) marco (separadores + borde exterior) con color y grosor elegidos
   if (state.mode === 'collage') {
-    const fw = Math.min(W, H) * (state.frameWidth / 100);
+    // 1) videos según la plantilla de efectos
+    const info = { cells: currentCells(), n: state.clips.length, total: totalDuration(), W, H, speed: state.templateSpeed };
+    const items = templateDef().anim(templateTime(), info);
+    items.forEach(it => {
+      const clip = state.clips[it.clipIndex];
+      if (clip) drawClipItem(ctx, clip, it);
+      else { ctx.fillStyle = '#0c0e12'; ctx.fillRect(it.x * W, it.y * H, it.w * W, it.h * H); }
+    });
+    // 2) marco: un borde por item (sigue el movimiento) + borde exterior
     if (fw >= 0.75) {
       ctx.strokeStyle = state.frameColor;
       ctx.lineJoin = 'miter';
       ctx.lineWidth = fw;
-      rects.forEach(({ dx, dy, dw, dh }) => ctx.strokeRect(dx, dy, dw, dh)); // líneas internas
-      ctx.strokeRect(fw / 2, fw / 2, W - fw, H - fw);                        // borde exterior completo
+      items.forEach(it => { ctx.globalAlpha = it.alpha != null ? it.alpha : 1; ctx.strokeRect(it.x * W, it.y * H, it.w * W, it.h * H); });
+      ctx.globalAlpha = 1;
+      ctx.strokeRect(fw / 2, fw / 2, W - fw, H - fw);
     }
+  } else {
+    const clip = state.clips[seqIndex];
+    if (clip) drawClipInCell(ctx, clip, 0, 0, W, H);
+    else { ctx.fillStyle = '#0c0e12'; ctx.fillRect(0, 0, W, H); }
   }
 
   const paused = !state.playing && !state.exporting;
@@ -599,8 +776,8 @@ function composite(forExport) {
   drawTexts(paused);
 
   // 4) resaltado del clip seleccionado (solo si NO hay un texto seleccionado; no se graba)
-  if (!forExport && !state.selectedTextId) {
-    rects.forEach(({ i, dx, dy, dw, dh }) => {
+  if (!forExport && !state.selectedTextId && state.mode === 'collage') {
+    cellRects().forEach(({ i, dx, dy, dw, dh }) => {
       const clip = state.clips[i];
       if (clip && clip.id === state.selectedId) {
         const lw = Math.max(3, W * 0.004);
@@ -841,6 +1018,7 @@ function stopPreview() {
   state.clips.forEach(c => c.video.pause());
   updateControls();
   renderStatic();
+  ensureIdleAnim();
 }
 
 // ---------- Exportar ----------
@@ -1470,6 +1648,7 @@ function snapshot() {
     texts: state.texts.map(t => ({ ...t })),
     layout: state.layout, format: state.format, mode: state.mode,
     frameColor: state.frameColor, frameWidth: state.frameWidth,
+    template: state.template, templateSpeed: state.templateSpeed,
     selectedId: state.selectedId, selectedTextId: state.selectedTextId,
   };
 }
@@ -1497,6 +1676,7 @@ function saveProjectNow() {
     texts: state.texts.map(t => ({ ...t })),
     mode: state.mode, layout: state.layout, format: state.format,
     frameColor: state.frameColor, frameWidth: state.frameWidth,
+    template: state.template, templateSpeed: state.templateSpeed,
     selectedId: state.selectedId, selectedTextId: state.selectedTextId,
   };
   try { localStorage.setItem(PROJECT_KEY, JSON.stringify(meta)); } catch (_) {}
@@ -1525,6 +1705,8 @@ async function restoreProject() {
   if (FORMATS[meta.format]) state.format = meta.format;
   if (meta.frameColor) state.frameColor = meta.frameColor;
   if (typeof meta.frameWidth === 'number') state.frameWidth = meta.frameWidth;
+  if (meta.template && TEMPLATES[meta.template]) state.template = meta.template;
+  if (typeof meta.templateSpeed === 'number') state.templateSpeed = meta.templateSpeed;
   state.selectedId = state.clips.find(c => c.id === meta.selectedId) ? meta.selectedId : (state.clips[0]?.id ?? null);
   state.selectedTextId = state.texts.find(t => t.id === meta.selectedTextId) ? meta.selectedTextId : null;
   nextTextId = Math.max(nextTextId, ...state.texts.map(t => (t.id || 0) + 1), 1);
@@ -1550,16 +1732,20 @@ function applySnapshot(s) {
   state.mode = s.mode;
   state.frameColor = s.frameColor;
   state.frameWidth = s.frameWidth;
+  if (s.template && TEMPLATES[s.template]) state.template = s.template;
+  if (typeof s.templateSpeed === 'number') state.templateSpeed = s.templateSpeed;
   state.selectedId = byId.has(s.selectedId) ? s.selectedId : (state.clips[0]?.id ?? null);
   state.selectedTextId = state.texts.find(t => t.id === s.selectedTextId) ? s.selectedTextId : null;
   // refrescar toda la interfaz
   syncModeUI();
   refreshTiles();
   refreshFrameInputs();
+  refreshTemplateUI();
   renderClipList();
   renderTextList();
   applyFormat();
   renderStatic();
+  ensureIdleAnim();
   saveSettings();
 }
 
@@ -1607,12 +1793,14 @@ async function init() {
   buildFormatTiles();
   initFrameControls();
   initProxyToggle();
+  initTemplateControls();
   syncModeUI();
   renderClipList();
   renderTextList();
   updateControls();
   applyFormat();
   renderStatic();
+  ensureIdleAnim();
   commit();            // estado inicial en el historial
   updateUndoButtons();
 }
