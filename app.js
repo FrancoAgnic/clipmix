@@ -839,9 +839,16 @@ async function exportVideo() {
   }
 
   const chunks = [];
+  let recordStart = 0;
   recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
-  recorder.onstop = () => {
-    const blob = new Blob(chunks, { type: (mime.split(';')[0]) || 'video/webm' });
+  recorder.onstop = async () => {
+    let blob = new Blob(chunks, { type: (mime.split(';')[0]) || 'video/webm' });
+    // Arreglar la duración del .webm para que se reproduzca completo (IG, etc.)
+    const durMs = recordStart ? (performance.now() - recordStart) : totalDuration() * 1000;
+    if (blob.type.includes('webm') && typeof fixWebmDuration === 'function') {
+      textEl.textContent = 'Finalizando…';
+      try { blob = await fixWebmDuration(blob, durMs); } catch (_) {}
+    }
     const ext = blob.type.includes('mp4') ? 'mp4' : 'webm';
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -866,6 +873,7 @@ async function exportVideo() {
   };
 
   recorder.start(100);
+  recordStart = performance.now();
 
   if (state.mode === 'collage') {
     const active = activeCollageClips();
