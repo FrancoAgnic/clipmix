@@ -133,22 +133,34 @@
     </aside>
   </main>
 
-  <!-- Sección: Fotos (carrusel panorámico) -->
+  <!-- Sección: Fotos (moodboard / carrusel panorámico) -->
   <section class="photo-layout">
     <div class="photo-stage panel">
       <div class="photo-canvas-wrap"><canvas id="photoPreview" width="10" height="10"></canvas></div>
-      <p class="hint">Las líneas punteadas marcan dónde se corta cada slide. Al deslizar en Instagram se ven conectadas, como una sola foto larga. Sube las imágenes en orden (1, 2, 3…).</p>
+      <div class="pan-row">
+        <span class="pan-ico">↔</span>
+        <input id="photoPan" class="pan-slider" type="range" min="0" max="1" step="0.001" value="0" />
+      </div>
+      <p class="hint">Arrastra <b>una foto</b> para moverla. Usa la <b>barra ↔</b> para deslizarte por el lienzo. Las líneas punteadas marcan los cortes del carrusel: lo que quede entre dos líneas se ve conectado al deslizar en Instagram.</p>
     </div>
     <aside class="photo-panel panel">
       <div class="panel-head">
-        <h2>Fotos</h2>
+        <h2>Moodboard</h2>
         <label class="btn btn-primary">
-          + Añadir
+          + Fotos
           <input id="photoInput" type="file" accept="image/*" multiple hidden />
         </label>
       </div>
       <ul id="photoList" class="photo-list"></ul>
-      <p id="photoHint" class="hint">Añade varias fotos. Se colocan en fila formando una tira horizontal continua.</p>
+      <p id="photoHint" class="hint">Añade fotos y colócalas libremente sobre el lienzo. Pueden superponerse y cruzar los cortes.</p>
+
+      <div class="opt-group">
+        <h3>Fondo</h3>
+        <div class="frame-controls">
+          <input id="photoBg" type="color" value="#111111" title="Color de fondo" />
+          <div class="swatches" id="photoBgSwatches"></div>
+        </div>
+      </div>
 
       <div class="opt-group">
         <h3>Formato del slide</h3>
@@ -162,17 +174,26 @@
           <span id="slidesVal">3</span>
           <button id="slidesPlus" class="btn">+</button>
         </div>
-        <p class="hint">Cuántas imágenes tendrá el carrusel. La tira se reparte en esa cantidad de cortes.</p>
+        <p class="hint">Cuánto de ancho tiene el lienzo (cada slide = un corte del carrusel).</p>
       </div>
 
       <div class="opt-group" id="photoAdjustGroup">
         <h3>Foto seleccionada</h3>
         <label class="slider-row">
           <span class="slab">Zoom</span>
-          <input id="photoZoom" type="range" min="100" max="300" step="1" value="100" />
+          <input id="photoZoom" type="range" min="20" max="400" step="1" value="100" />
           <span id="photoZoomVal" class="sval">100%</span>
         </label>
-        <p class="hint">Toca una foto en la vista previa y arrástrala para reencuadrarla (o pellizca para acercar).</p>
+        <label class="slider-row">
+          <span class="slab">Rotación</span>
+          <input id="photoRot" type="range" min="-180" max="180" step="1" value="0" />
+          <span id="photoRotVal" class="sval">0°</span>
+        </label>
+        <div class="btn-row">
+          <button id="photoFront" class="btn small">⤒ Al frente</button>
+          <button id="photoBack" class="btn small">⤓ Al fondo</button>
+        </div>
+        <p class="hint">Arrastra en el lienzo para mover · dos dedos para escalar/rotar.</p>
       </div>
 
       <div class="opt-group">
