@@ -249,6 +249,9 @@ body[data-section="photos"] .photo-layout { display: flex; flex-direction: colum
 #photoPreview { display: block; background: #111; border-radius: 4px; touch-action: none; }
 #photoBorderOpts { margin-top: 8px; }
 .photo-toolbar { display: flex; gap: 8px; margin-bottom: 8px; }
+#photoGradOpts { margin-top: 8px; }
+.dir-row { display: flex; gap: 8px; margin-top: 8px; }
+.dir-row .btn.active { background: var(--primary); border-color: var(--primary); color: #fff; }
 .photo-list .pv-add { position: absolute; bottom: 2px; right: 2px; background: var(--primary); color: #fff; font-size: 12px; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; pointer-events: none; }
 .pan-row { display: flex; align-items: center; gap: 8px; }
 .pan-ico { color: var(--muted); font-size: 16px; }
@@ -312,6 +315,15 @@ body[data-section="photos"] .photo-layout { display: flex; flex-direction: colum
   /* botones más grandes para el dedo */
   .layout-grid, .format-grid { grid-template-columns: repeat(4, 1fr); }
   .opt-tile { min-height: 66px; }
+
+  /* En Fotos, el lienzo queda fijo arriba mientras haces scroll en las herramientas */
+  body[data-section="photos"] .photo-layout { padding-top: 10px; }
+  body[data-section="photos"] .photo-stage {
+    position: sticky;
+    top: 0;
+    z-index: 6;
+    margin-bottom: 10px;
+  }
 }
 
 @media (max-width: 420px) {

@@ -161,9 +161,24 @@
 
       <div class="opt-group">
         <h3>Fondo</h3>
+        <label class="row switch-row">
+          <span>Degradado (2 colores)</span>
+          <input id="photoGrad" type="checkbox" />
+        </label>
         <div class="frame-controls">
-          <input id="photoBg" type="color" value="#111111" title="Color de fondo" />
+          <input id="photoBg" type="color" value="#111111" title="Color 1" />
           <div class="swatches" id="photoBgSwatches"></div>
+        </div>
+        <div id="photoGradOpts">
+          <div class="frame-controls">
+            <input id="photoBg2" type="color" value="#5b8cff" title="Color 2" />
+            <div class="swatches" id="photoBg2Swatches"></div>
+          </div>
+          <div class="dir-row">
+            <button data-dir="h" class="btn small">↔ Horizontal</button>
+            <button data-dir="v" class="btn small">↕</button>
+            <button data-dir="d" class="btn small">⤢</button>
+          </div>
         </div>
       </div>
 

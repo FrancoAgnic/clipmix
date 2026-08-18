@@ -16,7 +16,7 @@
   const PROXY_MAX = 640;
 
   // photo: { id, img, proxy, file, url, name, cx, cy, scale, rot, border:{on,color,width} }
-  const P = { photos: [], format: '4:5', slides: 3, bg: '#111111', selectedId: null, viewX: 0 };
+  const P = { photos: [], format: '4:5', slides: 3, bg: '#111111', bg2: '#5b8cff', bgMode: 'solid', bgDir: 'h', selectedId: null, viewX: 0 };
   let nextPid = 1;
 
   const PHOTOS_KEY = 'clipmix_photos_v2';
@@ -135,8 +135,28 @@
       w.appendChild(b);
     });
   }
+  function buildBg2Swatches() {
+    const w = $('photoBg2Swatches'); if (!w) return; w.innerHTML = '';
+    BG_SWATCHES.forEach(col => {
+      const b = document.createElement('button');
+      b.className = 'swatch' + (col.toLowerCase() === P.bg2.toLowerCase() ? ' active' : '');
+      b.style.background = col; b.title = col; b.onclick = () => setBg2(col);
+      w.appendChild(b);
+    });
+  }
   function setBg(col) { P.bg = col; $('photoBg').value = col; buildBgSwatches(); renderPhoto(); commitPhoto(); savePhotosSoon(); }
+  function setBg2(col) { P.bg2 = col; $('photoBg2').value = col; buildBg2Swatches(); renderPhoto(); commitPhoto(); savePhotosSoon(); }
   $('photoBg').addEventListener('input', () => setBg($('photoBg').value));
+  $('photoBg2').addEventListener('input', () => setBg2($('photoBg2').value));
+  $('photoGrad').addEventListener('change', () => { P.bgMode = $('photoGrad').checked ? 'gradient' : 'solid'; syncBgUI(); renderPhoto(); commitPhoto(); savePhotosSoon(); });
+  document.querySelector('.dir-row').addEventListener('click', (e) => { const btn = e.target.closest('[data-dir]'); if (!btn) return; P.bgDir = btn.dataset.dir; syncBgUI(); renderPhoto(); commitPhoto(); savePhotosSoon(); });
+  function syncBgUI() {
+    $('photoGrad').checked = P.bgMode === 'gradient';
+    $('photoGradOpts').style.display = P.bgMode === 'gradient' ? 'block' : 'none';
+    $('photoBg').value = P.bg; $('photoBg2').value = P.bg2;
+    document.querySelectorAll('.dir-row [data-dir]').forEach(b => b.classList.toggle('active', b.dataset.dir === P.bgDir));
+    buildBgSwatches(); buildBg2Swatches();
+  }
 
   // ---------- Formato / slides ----------
   function buildPhotoFormatTiles() {
@@ -218,7 +238,14 @@
     c.restore();
   }
   function drawBoard(c, W, H, guides, useProxy) {
-    c.fillStyle = P.bg; c.fillRect(0, 0, W, H);
+    if (P.bgMode === 'gradient') {
+      const g = P.bgDir === 'v' ? c.createLinearGradient(0, 0, 0, H)
+        : P.bgDir === 'd' ? c.createLinearGradient(0, 0, W, H)
+          : c.createLinearGradient(0, 0, W, 0);
+      g.addColorStop(0, P.bg); g.addColorStop(1, P.bg2);
+      c.fillStyle = g;
+    } else { c.fillStyle = P.bg; }
+    c.fillRect(0, 0, W, H);
     placedPhotos().forEach(p => drawPhotoObj(c, p, useProxy));
     if (guides) {
       const { sw } = boardDims();
@@ -346,7 +373,7 @@
   function savePhotosSoon() { clearTimeout(saveTimer); saveTimer = setTimeout(savePhotosNow, 500); }
   function savePhotosNow() {
     const meta = {
-      format: P.format, slides: P.slides, bg: P.bg, selectedId: P.selectedId,
+      format: P.format, slides: P.slides, bg: P.bg, bg2: P.bg2, bgMode: P.bgMode, bgDir: P.bgDir, selectedId: P.selectedId,
       photos: P.photos.map(p => ({ id: p.id, name: p.name, cx: p.cx, cy: p.cy, scale: p.scale, rot: p.rot, placed: p.placed, border: { ...p.border } })),
     };
     try { localStorage.setItem(PHOTOS_KEY, JSON.stringify(meta)); } catch (_) {}
@@ -359,6 +386,9 @@
     if (SLIDE[meta.format]) P.format = meta.format;
     if (typeof meta.slides === 'number') P.slides = clamp(meta.slides, 1, 12);
     if (meta.bg) P.bg = meta.bg;
+    if (meta.bg2) P.bg2 = meta.bg2;
+    if (meta.bgMode) P.bgMode = meta.bgMode;
+    if (meta.bgDir) P.bgDir = meta.bgDir;
     for (const pm of meta.photos) {
       let file; try { file = await clipStore.get('photo_' + pm.id); } catch (_) {}
       if (!file) continue;
@@ -373,7 +403,7 @@
     return {
       order: P.photos.map(p => p.id),
       props: P.photos.map(p => ({ id: p.id, cx: p.cx, cy: p.cy, scale: p.scale, rot: p.rot, placed: p.placed, border: { ...p.border } })),
-      bg: P.bg, format: P.format, slides: P.slides, selectedId: P.selectedId,
+      bg: P.bg, bg2: P.bg2, bgMode: P.bgMode, bgDir: P.bgDir, format: P.format, slides: P.slides, selectedId: P.selectedId,
     };
   }
   function commitPhoto() {
@@ -389,9 +419,10 @@
     P.photos.forEach(p => { if (!s.order.includes(p.id)) arr.push(p); });
     P.photos = arr;
     s.props.forEach(pr => { const p = byId.get(pr.id); if (p) { p.cx = pr.cx; p.cy = pr.cy; p.scale = pr.scale; p.rot = pr.rot; p.placed = pr.placed; p.border = { ...pr.border }; } });
-    P.bg = s.bg; if (SLIDE[s.format]) P.format = s.format; P.slides = clamp(s.slides, 1, 12);
+    P.bg = s.bg; if (s.bg2) P.bg2 = s.bg2; if (s.bgMode) P.bgMode = s.bgMode; if (s.bgDir) P.bgDir = s.bgDir;
+    if (SLIDE[s.format]) P.format = s.format; P.slides = clamp(s.slides, 1, 12);
     P.selectedId = (byId.get(s.selectedId) && byId.get(s.selectedId).placed) ? s.selectedId : (placedPhotos().slice(-1)[0]?.id ?? null);
-    refreshPhotoFormat(); $('slidesVal').textContent = P.slides; $('photoBg').value = P.bg; buildBgSwatches();
+    refreshPhotoFormat(); $('slidesVal').textContent = P.slides; syncBgUI();
     renderPhotoList(); syncAdjust(); renderPhoto(); savePhotosSoon(); updatePhotoUndo();
   }
   function undoPhoto() { if (pIdx <= 0) return; pIdx--; applyPhotoSnap(pHist[pIdx]); }
@@ -413,10 +444,9 @@
     buildPhotoFormatTiles();
     $('slidesVal').textContent = P.slides;
     try { await restorePhotos(); } catch (_) {}
-    buildBgSwatches();
+    syncBgUI();
     refreshPhotoFormat();
     $('slidesVal').textContent = P.slides;
-    $('photoBg').value = P.bg;
     renderPhotoList();
     syncAdjust();
     renderPhoto();
