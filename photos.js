@@ -16,7 +16,7 @@
   const PROXY_MAX = 640;
 
   // photo: { id, img, proxy, file, url, name, cx, cy, scale, rot, border:{on,color,width} }
-  const P = { photos: [], format: '4:5', slides: 3, bg: '#111111', bg2: '#5b8cff', bgMode: 'solid', bgDir: 'h', selectedId: null, viewX: 0 };
+  const P = { photos: [], format: '4:5', slides: 3, bg: '#111111', bg2: '#5b8cff', bgMode: 'solid', bgDir: 'h', selectedId: null, viewX: 0, exporting: false };
   let nextPid = 1;
 
   const PHOTOS_KEY = 'clipmix_photos_v2';
@@ -30,8 +30,29 @@
       if (!btn) return;
       document.body.dataset.section = btn.dataset.section;
       document.querySelectorAll('.sec-btn').forEach(x => x.classList.toggle('active', x === btn));
-      if (btn.dataset.section === 'photos') { if (window.stopPreview) try { window.stopPreview(); } catch (_) {} renderPhoto(); }
+      if (btn.dataset.section === 'photos') {
+        if (window.stopPreview) try { window.stopPreview(); } catch (_) {}
+        placedPhotos().forEach(p => { if (p.kind === 'video' && p.video) p.video.play().catch(() => {}); });
+        renderPhoto(); ensureVideoAnim();
+      } else {
+        P.photos.forEach(p => { if (p.kind === 'video' && p.video) p.video.pause(); });
+        if (vidRaf) { cancelAnimationFrame(vidRaf); vidRaf = null; }
+      }
     });
+  }
+
+  // Bucle que redibuja mientras haya videos colocados (para verlos moverse)
+  let vidRaf = null;
+  function anyPlacedVideo() { return placedPhotos().some(p => p.kind === 'video'); }
+  function ensureVideoAnim() {
+    if (vidRaf) return;
+    if (document.body.dataset.section !== 'photos' || !anyPlacedVideo()) return;
+    const tick = () => {
+      if (document.body.dataset.section !== 'photos' || !anyPlacedVideo() || P.exporting) { vidRaf = null; return; }
+      doRender();
+      vidRaf = requestAnimationFrame(tick);
+    };
+    vidRaf = requestAnimationFrame(tick);
   }
 
   function boardDims() { const s = SLIDE[P.format]; return { sw: s.w, sh: s.h, W: s.w * P.slides, H: s.h }; }
@@ -48,8 +69,47 @@
     return c;
   }
 
-  // ---------- Cargar fotos ----------
-  $('photoInput').addEventListener('change', (e) => { [...e.target.files].forEach(f => addPhoto(f)); e.target.value = ''; });
+  // ---------- Cargar fotos / videos ----------
+  $('photoInput').addEventListener('change', (e) => {
+    [...e.target.files].forEach(f => { if (f.type.startsWith('video')) addVideo(f); else addPhoto(f); });
+    e.target.value = '';
+  });
+
+  function addVideo(file, opts = {}) {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement('video');
+    video.src = url; video.muted = true; video.loop = true; video.playsInline = true; video.preload = 'auto';
+    const { W, H } = boardDims();
+    const idx = P.photos.length;
+    const p = {
+      id: opts.id != null ? opts.id : nextPid++, kind: 'video', file, url, video, img: null, proxy: null, poster: null, _posterImg: null, name: file.name,
+      cx: opts.cx != null ? opts.cx : clamp((0.18 + idx * 0.28) * H, 0, W),
+      cy: opts.cy != null ? opts.cy : H * (idx % 2 ? 0.62 : 0.42),
+      scale: opts.scale || 1, rot: opts.rot || 0,
+      border: opts.border ? { ...opts.border } : { on: false, color: '#ffffff', width: 0.04 },
+      feather: opts.feather || 0,
+      placed: opts.placed != null ? opts.placed : false,
+    };
+    if (opts.id != null) nextPid = Math.max(nextPid, opts.id + 1);
+    video.addEventListener('loadeddata', () => {
+      // poster (primer frame) para la miniatura del cajón
+      try {
+        const pc = document.createElement('canvas'); pc.width = 120; pc.height = 120;
+        const g = pc.getContext('2d');
+        const s = Math.max(120 / video.videoWidth, 120 / video.videoHeight);
+        g.drawImage(video, (120 - video.videoWidth * s) / 2, (120 - video.videoHeight * s) / 2, video.videoWidth * s, video.videoHeight * s);
+        p.poster = pc.toDataURL('image/jpeg', 0.7);
+        const im = new Image(); im.src = p.poster; p._posterImg = im;
+      } catch (_) {}
+      renderPhotoList();
+      if (p.placed) { video.play().catch(() => {}); ensureVideoAnim(); }
+      renderPhoto();
+    });
+    P.photos.push(p);
+    renderPhotoList(); renderPhoto();
+    if (!opts.restore) { savePhotoBlob(p); commitPhoto(); savePhotosSoon(); }
+    return p;
+  }
 
   function addPhoto(file, opts = {}) {
     const url = URL.createObjectURL(file);
@@ -57,7 +117,7 @@
     const { W, H } = boardDims();
     const idx = P.photos.length;
     const p = {
-      id: opts.id != null ? opts.id : nextPid++, file, url, img, proxy: null, name: file.name,
+      id: opts.id != null ? opts.id : nextPid++, kind: 'photo', file, url, img, proxy: null, name: file.name,
       cx: opts.cx != null ? opts.cx : clamp((0.18 + idx * 0.28) * H, 0, W),
       cy: opts.cy != null ? opts.cy : H * (idx % 2 ? 0.62 : 0.42),
       scale: opts.scale || 1, rot: opts.rot || 0,
@@ -87,11 +147,13 @@
     p.placed = true;
     P.photos = P.photos.filter(x => x !== p); P.photos.push(p); // al frente
     P.selectedId = p.id;
+    if (p.kind === 'video' && p.video) { p.video.play().catch(() => {}); ensureVideoAnim(); }
     renderPhotoList(); syncAdjust(); renderPhoto(); commitPhoto(); savePhotosSoon();
   }
   function unplacePhoto() {
     const p = selectedPhoto(); if (!p) return;
     p.placed = false;
+    if (p.kind === 'video' && p.video) p.video.pause();
     P.selectedId = placedPhotos().slice(-1)[0]?.id ?? null;
     renderPhotoList(); syncAdjust(); renderPhoto(); commitPhoto(); savePhotosSoon();
   }
@@ -99,6 +161,7 @@
   function removePhoto(id) {
     const i = P.photos.findIndex(p => p.id === id);
     if (i < 0) return;
+    if (P.photos[i].kind === 'video' && P.photos[i].video) { try { P.photos[i].video.pause(); } catch (_) {} }
     URL.revokeObjectURL(P.photos[i].url);
     P.photos.splice(i, 1);
     if (P.selectedId === id) P.selectedId = placedPhotos().slice(-1)[0]?.id ?? null;
@@ -118,10 +181,13 @@
     $('photoHint').style.display = tray.length ? 'none' : 'block';
     tray.forEach((p) => {
       const li = document.createElement('li');
-      const im = document.createElement('img'); im.src = p.url; im.title = 'Agregar al lienzo'; im.onclick = () => placeOnCanvas(p.id);
+      const im = document.createElement('img');
+      im.src = p.kind === 'video' ? (p.poster || 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==') : p.url;
+      im.title = 'Agregar al lienzo'; im.onclick = () => placeOnCanvas(p.id);
       const add = document.createElement('span'); add.className = 'pv-add'; add.textContent = '＋';
       const rm = document.createElement('button'); rm.className = 'pv-rm'; rm.textContent = '✕'; rm.onclick = () => removePhoto(p.id);
       li.appendChild(im); li.appendChild(add); li.appendChild(rm);
+      if (p.kind === 'video') { const badge = document.createElement('span'); badge.className = 'pv-vid'; badge.textContent = '▶'; li.appendChild(badge); }
       list.appendChild(li);
     });
   }
@@ -219,20 +285,30 @@
   }
 
   // ---------- Dibujo ----------
+  function objNatural(p) {
+    if (p.kind === 'video') return { w: p.video ? p.video.videoWidth : 0, h: p.video ? p.video.videoHeight : 0 };
+    return { w: p.img ? p.img.naturalWidth : 0, h: p.img ? p.img.naturalHeight : 0 };
+  }
+  function objSource(p, useProxy) {
+    if (p.kind === 'video') return (p.video && p.video.readyState >= 2) ? p.video : (p._posterImg || null);
+    return (useProxy && p.proxy) ? p.proxy : (p.img && p.img.complete && p.img.naturalWidth ? p.img : null);
+  }
   function photoSize(p) {
     const { H } = boardDims();
-    const img = p.img;
-    if (!img || !img.naturalWidth) { const d = H * 0.5 * p.scale; return { w: d, h: d }; }
+    const nat = objNatural(p);
+    if (!nat.w || !nat.h) { const d = H * 0.5 * p.scale; return { w: d, h: d }; }
     const targetLong = H * 0.6 * p.scale;
-    const s = targetLong / Math.max(img.naturalWidth, img.naturalHeight);
-    return { w: img.naturalWidth * s, h: img.naturalHeight * s };
+    const s = targetLong / Math.max(nat.w, nat.h);
+    return { w: nat.w * s, h: nat.h * s };
   }
-  // Versión de la foto con bordes desvanecidos (cacheada por tamaño/feather)
+  // Versión con bordes desvanecidos (cacheada en fotos; recalculada en video)
   function getFeathered(p, src) {
-    const sw = src.width || src.naturalWidth, sh = src.height || src.naturalHeight;
+    const isVid = src.tagName === 'VIDEO';
+    const sw = isVid ? src.videoWidth : (src.width || src.naturalWidth);
+    const sh = isVid ? src.videoHeight : (src.height || src.naturalHeight);
     if (!sw || !sh) return src;
     const key = `${sw}x${sh}_${p.feather.toFixed(3)}`;
-    if (p._feather && p._feather.key === key) return p._feather.c;
+    if (!isVid && p._feather && p._feather.key === key) return p._feather.c;
     const oc = document.createElement('canvas'); oc.width = sw; oc.height = sh;
     const g = oc.getContext('2d');
     g.drawImage(src, 0, 0, sw, sh);
@@ -246,12 +322,12 @@
     g.globalCompositeOperation = 'destination-in';
     g.drawImage(mc, 0, 0);
     g.globalCompositeOperation = 'source-over';
-    p._feather = { key, c: oc };
+    if (!isVid) p._feather = { key, c: oc };
     return oc;
   }
   function drawPhotoObj(c, p, useProxy) {
     const { w, h } = photoSize(p);
-    let src = (useProxy && p.proxy) ? p.proxy : (p.img && p.img.complete && p.img.naturalWidth ? p.img : null);
+    let src = objSource(p, useProxy);
     if (src && p.feather > 0) src = getFeathered(p, src);
     c.save();
     c.translate(p.cx, p.cy);
@@ -375,25 +451,110 @@
   cv.addEventListener('pointerup', endPt);
   cv.addEventListener('pointercancel', endPt);
 
-  // ---------- Exportar (alta resolución) ----------
+  // ---------- Exportar (carrusel mixto foto/video, alta resolución) ----------
   $('photoExportBtn').onclick = exportCarousel;
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-  async function exportCarousel() {
-    if (!P.photos.length) { setStatus('Añade al menos una foto.'); return; }
+  function slideRange(k) { const { sw } = boardDims(); return { x0: k * sw, x1: (k + 1) * sw }; }
+  function bboxX(p) {
+    const { w, h } = photoSize(p);
+    const c = Math.abs(Math.cos(p.rot * Math.PI / 180)), s = Math.abs(Math.sin(p.rot * Math.PI / 180));
+    const bw = w * c + h * s;
+    return { x0: p.cx - bw / 2, x1: p.cx + bw / 2 };
+  }
+  function videosInSlide(k) {
+    const { x0, x1 } = slideRange(k);
+    return placedPhotos().filter(p => p.kind === 'video' && p.video && (() => { const b = bboxX(p); return b.x1 > x0 && b.x0 < x1; })());
+  }
+  function downloadNamed(blob, name) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = name; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }
+
+  async function encodeSlideVideo(k) {
     const { sw, sh, W, H } = boardDims();
-    const board = document.createElement('canvas'); board.width = W; board.height = H;
-    drawBoard(board.getContext('2d'), W, H, false, false); // sin proxy = alta resolución
-    for (let k = 0; k < P.slides; k++) {
-      const c = document.createElement('canvas'); c.width = sw; c.height = sh;
-      c.getContext('2d').drawImage(board, k * sw, 0, sw, sh, 0, 0, sw, sh);
-      const blob = await new Promise(res => c.toBlob(res, 'image/jpeg', 0.92));
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = `carrusel-${String(k + 1).padStart(2, '0')}.jpg`; a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 4000);
-      setStatus(`Guardando ${k + 1} de ${P.slides}…`);
-      await sleep(400);
+    const fps = 30;
+    const allV = placedPhotos().filter(p => p.kind === 'video' && p.video);
+    const inSlide = videosInSlide(k);
+    let dur = Math.max(1, ...inSlide.map(p => isFinite(p.video.duration) ? p.video.duration : 0));
+    dur = Math.min(dur, 10);
+    allV.forEach(p => { try { p.video.loop = true; p.video.currentTime = 0; } catch (_) {} });
+    await Promise.all(allV.map(p => p.video.play().catch(() => {})));
+    const slide = document.createElement('canvas'); slide.width = sw; slide.height = sh;
+    const sc = slide.getContext('2d');
+    const drawSlide = () => { sc.save(); sc.setTransform(1, 0, 0, 1, -k * sw, 0); drawBoard(sc, W, H, false, false); sc.restore(); };
+
+    if (typeof VideoEncoder !== 'undefined' && typeof VideoFrame !== 'undefined' && window.Mp4Muxer) {
+      const cands = [['avc1.42001f', 'avc'], ['avc1.4d0028', 'avc'], ['vp09.00.10.08', 'vp9'], ['av01.0.04M.08', 'av1']];
+      let vcfg = null;
+      for (const [codec, mux] of cands) { try { if ((await VideoEncoder.isConfigSupported({ codec, width: sw, height: sh, bitrate: 8e6, framerate: fps })).supported) { vcfg = { codec, mux }; break; } } catch (_) {} }
+      if (vcfg) {
+        const { Muxer, ArrayBufferTarget } = window.Mp4Muxer;
+        const target = new ArrayBufferTarget();
+        const muxer = new Muxer({ target, video: { codec: vcfg.mux, width: sw, height: sh, frameRate: fps }, fastStart: 'in-memory' });
+        let err = null; const venc = new VideoEncoder({ output: (c, m) => muxer.addVideoChunk(c, m), error: e => err = e });
+        venc.configure({ codec: vcfg.codec, width: sw, height: sh, bitrate: 8e6, framerate: fps });
+        const total = Math.round(dur * fps);
+        const start = performance.now(); let lastIdx = -1;
+        await new Promise(resolve => {
+          const loop = async () => {
+            const t = (performance.now() - start) / 1000;
+            const idx = Math.min(total - 1, Math.floor(t * fps));
+            if (idx > lastIdx) {
+              lastIdx = idx; drawSlide();
+              let g = 0; while (venc.encodeQueueSize > 6 && g++ < 500) await new Promise(r => setTimeout(r, 4));
+              const fr = new VideoFrame(slide, { timestamp: Math.round(idx * 1e6 / fps), duration: Math.round(1e6 / fps) });
+              try { venc.encode(fr, { keyFrame: idx % 60 === 0 }); } catch (_) {}
+              fr.close();
+              setStatus(`Slide ${k + 1}/${P.slides}: video ${Math.round(t)}s/${Math.round(dur)}s`);
+            }
+            if (t >= dur) { resolve(); return; }
+            requestAnimationFrame(loop);
+          };
+          requestAnimationFrame(loop);
+        });
+        await venc.flush(); muxer.finalize(); if (err) throw err;
+        return new Blob([target.buffer], { type: 'video/mp4' });
+      }
     }
-    setStatus(`¡Listo! ${P.slides} imágenes. Súbelas al carrusel de IG en orden (1, 2, 3…).`);
+    // Fallback: MediaRecorder
+    const stream = slide.captureStream(fps);
+    const mime = ['video/mp4;codecs=avc1.42E01E', 'video/webm;codecs=vp9', 'video/webm'].find(m => MediaRecorder.isTypeSupported(m)) || '';
+    const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8e6 });
+    const chunks = []; rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+    const stopped = new Promise(r => rec.onstop = r);
+    const t0 = performance.now(); rec.start(100);
+    await new Promise(resolve => { const loop = () => { drawSlide(); if ((performance.now() - t0) / 1000 >= dur) { resolve(); return; } requestAnimationFrame(loop); }; requestAnimationFrame(loop); });
+    rec.stop(); await stopped;
+    let blob = new Blob(chunks, { type: (mime.split(';')[0]) || 'video/webm' });
+    if (blob.type.includes('webm') && window.fixWebmDuration) { try { blob = await window.fixWebmDuration(blob, dur * 1000); } catch (_) {} }
+    return blob;
+  }
+
+  async function exportCarousel() {
+    if (!placedPhotos().length) { setStatus('Coloca al menos una foto o video en el lienzo.'); return; }
+    P.exporting = true; if (vidRaf) { cancelAnimationFrame(vidRaf); vidRaf = null; }
+    const { sw, sh, W, H } = boardDims();
+    try {
+      for (let k = 0; k < P.slides; k++) {
+        if (videosInSlide(k).length) {
+          setStatus(`Slide ${k + 1}/${P.slides}: procesando video…`);
+          const blob = await encodeSlideVideo(k);
+          if (blob) { const ext = blob.type.includes('mp4') ? 'mp4' : 'webm'; downloadNamed(blob, `carrusel-${String(k + 1).padStart(2, '0')}.${ext}`); }
+        } else {
+          const c2 = document.createElement('canvas'); c2.width = sw; c2.height = sh;
+          const cc = c2.getContext('2d'); cc.save(); cc.setTransform(1, 0, 0, 1, -k * sw, 0); drawBoard(cc, W, H, false, false); cc.restore();
+          const blob = await new Promise(res => c2.toBlob(res, 'image/jpeg', 0.92));
+          downloadNamed(blob, `carrusel-${String(k + 1).padStart(2, '0')}.jpg`);
+          setStatus(`Guardando slide ${k + 1} de ${P.slides}…`);
+        }
+        await sleep(450);
+      }
+      setStatus(`¡Listo! ${P.slides} archivos. Súbelos al carrusel de IG en orden (1, 2, 3…).`);
+    } catch (e) { console.error(e); setStatus('Hubo un problema al exportar. Prueba de nuevo o baja el número de slides.'); }
+    P.exporting = false;
+    placedPhotos().forEach(p => { if (p.kind === 'video' && p.video) p.video.play().catch(() => {}); });
+    ensureVideoAnim();
   }
   function setStatus(t) { $('photoExportStatus').textContent = t; }
 
@@ -402,7 +563,7 @@
   function savePhotosNow() {
     const meta = {
       format: P.format, slides: P.slides, bg: P.bg, bg2: P.bg2, bgMode: P.bgMode, bgDir: P.bgDir, selectedId: P.selectedId,
-      photos: P.photos.map(p => ({ id: p.id, name: p.name, cx: p.cx, cy: p.cy, scale: p.scale, rot: p.rot, feather: p.feather, placed: p.placed, border: { ...p.border } })),
+      photos: P.photos.map(p => ({ id: p.id, kind: p.kind, name: p.name, cx: p.cx, cy: p.cy, scale: p.scale, rot: p.rot, feather: p.feather, placed: p.placed, border: { ...p.border } })),
     };
     try { localStorage.setItem(PHOTOS_KEY, JSON.stringify(meta)); } catch (_) {}
   }
@@ -420,7 +581,8 @@
     for (const pm of meta.photos) {
       let file; try { file = await clipStore.get('photo_' + pm.id); } catch (_) {}
       if (!file) continue;
-      addPhoto(file, { restore: true, id: pm.id, cx: pm.cx, cy: pm.cy, scale: pm.scale, rot: pm.rot, feather: pm.feather, border: pm.border, placed: pm.placed != null ? pm.placed : true });
+      const o = { restore: true, id: pm.id, cx: pm.cx, cy: pm.cy, scale: pm.scale, rot: pm.rot, feather: pm.feather, border: pm.border, placed: pm.placed != null ? pm.placed : true };
+      if (pm.kind === 'video' || (file.type && file.type.startsWith('video'))) addVideo(file, o); else addPhoto(file, o);
     }
     if (meta.selectedId != null && P.photos.find(p => p.id === meta.selectedId)) P.selectedId = meta.selectedId;
   }
@@ -478,6 +640,8 @@
     renderPhotoList();
     syncAdjust();
     renderPhoto();
+    placedPhotos().forEach(p => { if (p.kind === 'video' && p.video) p.video.play().catch(() => {}); });
+    ensureVideoAnim();
     commitPhoto();
     updatePhotoUndo();
   }

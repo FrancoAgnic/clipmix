@@ -253,6 +253,7 @@ body[data-section="photos"] .photo-layout { display: flex; flex-direction: colum
 .dir-row { display: flex; gap: 8px; margin-top: 8px; }
 .dir-row .btn.active { background: var(--primary); border-color: var(--primary); color: #fff; }
 .photo-list .pv-add { position: absolute; bottom: 2px; right: 2px; background: var(--primary); color: #fff; font-size: 12px; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; pointer-events: none; }
+.photo-list .pv-vid { position: absolute; top: 2px; left: 2px; background: rgba(0,0,0,.65); color: #fff; font-size: 9px; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; pointer-events: none; }
 .pan-row { display: flex; align-items: center; gap: 8px; }
 .pan-ico { color: var(--muted); font-size: 16px; }
 .pan-slider { flex: 1; accent-color: var(--primary); height: 30px; }
