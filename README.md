@@ -2,7 +2,12 @@
 
 App web para hacer **collages de video**: junta varios videos en uno solo y expórtalo como un único archivo — todo funciona **en tu navegador**, sin servidores y sin subir tus videos a internet.
 
-## Qué hace
+## Dos secciones
+
+- **🎬 Video** — collage de videos (todo lo de abajo).
+- **🖼️ Fotos** — carrusel panorámico para Instagram: pones varias fotos en una tira horizontal continua y la app la corta en varias slides que, al deslizar en IG, se ven **conectadas como una sola foto larga**. Eliges formato del slide (4:5, 1:1, 4:3) y cuántas slides; cada foto se puede reencuadrar (arrastrar/zoom). Descarga una imagen por slide (súbelas en orden 1, 2, 3…).
+
+## Qué hace (Video)
 
 - **Modo Cuadrícula** — varios videos se reproducen *al mismo tiempo* en una grilla (2 columnas, 2 filas, 3, 2×2, 1+2…). Estilo pantalla dividida.
 - **Efectos / plantillas animadas** (para trends de IG): Zoom lento (Ken Burns), Entrada, Beat, Ola, Balanceo, Parallax, Foco rotativo y **Cambia videos** (las celdas van rotando qué video muestran) — con control de velocidad. Se ven en la vista previa y quedan grabados al exportar.

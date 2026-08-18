@@ -160,7 +160,8 @@ function templateTime() {
 // Bucle de animación en reposo: mueve el efecto en la vista previa aunque esté en pausa
 let idleRaf = null;
 function idleActive() {
-  return !state.playing && !state.exporting && state.mode === 'collage' && state.template !== 'none' && state.clips.length > 0;
+  return !state.playing && !state.exporting && state.mode === 'collage' && state.template !== 'none'
+    && state.clips.length > 0 && document.body.dataset.section !== 'photos';
 }
 function idleAnimTick() {
   if (!idleActive()) { idleRaf = null; return; }
@@ -1020,6 +1021,7 @@ function stopPreview() {
   renderStatic();
   ensureIdleAnim();
 }
+window.stopPreview = stopPreview;
 
 // ---------- Exportar ----------
 let exportJob = null;
