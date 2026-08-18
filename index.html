@@ -193,6 +193,21 @@
           <button id="photoFront" class="btn small">⤒ Al frente</button>
           <button id="photoBack" class="btn small">⤓ Al fondo</button>
         </div>
+        <label class="row switch-row" style="margin-top:10px">
+          <span>Marco</span>
+          <input id="photoBorder" type="checkbox" />
+        </label>
+        <div id="photoBorderOpts">
+          <div class="frame-controls">
+            <input id="photoBorderColor" type="color" value="#ffffff" title="Color del marco" />
+            <div class="swatches" id="photoBorderSwatches"></div>
+          </div>
+          <label class="slider-row">
+            <span class="slab">Grosor</span>
+            <input id="photoBorderW" type="range" min="0.5" max="15" step="0.5" value="4" />
+            <span id="photoBorderWVal" class="sval">4%</span>
+          </label>
+        </div>
         <p class="hint">Arrastra en el lienzo para mover · dos dedos para escalar/rotar.</p>
       </div>
 

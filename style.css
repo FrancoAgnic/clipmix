@@ -245,8 +245,9 @@ body[data-section="photos"] .layout { display: none; }
 body[data-section="photos"] .tabbar { display: none; }
 body[data-section="photos"] .photo-layout { display: flex; flex-direction: column; }
 .photo-stage { display: flex; flex-direction: column; gap: 8px; }
-.photo-canvas-wrap { background: #000; border-radius: 10px; overflow: hidden; position: relative; padding: 8px; }
-#photoPreview { display: block; background: #111; border-radius: 4px; touch-action: none; transform-origin: left top; will-change: transform; }
+.photo-canvas-wrap { background: #000; border-radius: 10px; overflow: hidden; position: relative; padding: 8px; display: flex; justify-content: center; align-items: center; }
+#photoPreview { display: block; background: #111; border-radius: 4px; touch-action: none; }
+#photoBorderOpts { margin-top: 8px; }
 .pan-row { display: flex; align-items: center; gap: 8px; }
 .pan-ico { color: var(--muted); font-size: 16px; }
 .pan-slider { flex: 1; accent-color: var(--primary); height: 30px; }

@@ -5,7 +5,7 @@ App web para hacer **collages de video**: junta varios videos en uno solo y exp�
 ## Dos secciones
 
 - **🎬 Video** — collage de videos (todo lo de abajo).
-- **🖼️ Fotos** — **moodboard / carrusel panorámico** para Instagram: un lienzo largo horizontal con **color de fondo** donde colocas fotos **libremente** (mover, escalar, rotar, superponer con capas al frente/al fondo). Se corta en varias slides que, al deslizar en IG, se ven **conectadas** — una foto puede quedar entre dos slides y continuar. Te desplazas por el lienzo con una **barra ↔** (arrastrar mueve la foto, no el fondo). Descarga una imagen por slide (súbelas en orden 1, 2, 3…). Se autoguarda.
+- **🖼️ Fotos** — **moodboard / carrusel panorámico** para Instagram: un lienzo largo horizontal con **color de fondo** donde colocas fotos **libremente** (mover, escalar, rotar, superponer con capas al frente/al fondo). Se corta en varias slides que, al deslizar en IG, se ven **conectadas** — una foto puede quedar entre dos slides y continuar. Te desplazas por el lienzo con una **barra ↔** (arrastrar mueve la foto, no el fondo). Cada foto puede llevar un **marco** (color y grosor). Optimizado para muchas fotos: usa **proxies** de baja resolución y dibuja solo la ventana visible mientras editas (fluido con 30+ fotos), y **exporta en alta**. Descarga una imagen por slide (súbelas en orden 1, 2, 3…). Se autoguarda.
 
 ## Qué hace (Video)
 
