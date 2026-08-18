@@ -259,6 +259,8 @@ body[data-section="photos"] .photo-layout { display: flex; flex-direction: colum
 .pan-slider { flex: 1; accent-color: var(--primary); height: 30px; }
 .btn-row { display: flex; gap: 8px; }
 .btn-row .btn { flex: 1; }
+.clear-all { margin-top: 6px; color: var(--danger); border-color: var(--line); }
+.clear-all:hover { border-color: var(--danger); }
 .photo-list { list-style: none; margin: 0 0 12px; padding: 4px 0; display: flex; gap: 10px; overflow-x: auto; }
 .photo-list li { position: relative; flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .photo-list img { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; border: 2px solid var(--line); cursor: pointer; }

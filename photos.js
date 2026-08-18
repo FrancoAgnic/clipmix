@@ -158,6 +158,18 @@
     renderPhotoList(); syncAdjust(); renderPhoto(); commitPhoto(); savePhotosSoon();
   }
   $('photoUnplace').onclick = unplacePhoto;
+
+  function clearAll() {
+    if (!P.photos.length) { setStatus('El lienzo ya está vacío.'); return; }
+    if (!window.confirm('¿Vaciar todo? Se quitarán todas las fotos y videos del lienzo y del cajón. Esto no se puede deshacer.')) return;
+    P.photos.forEach(p => { try { if (p.kind === 'video' && p.video) p.video.pause(); } catch (_) {} URL.revokeObjectURL(p.url); delPhotoBlob(p.id); });
+    if (vidRaf) { cancelAnimationFrame(vidRaf); vidRaf = null; }
+    P.photos = []; P.selectedId = null; P.viewX = 0;
+    $('photoPan').value = 0;
+    renderPhotoList(); syncAdjust(); renderPhoto(); commitPhoto(); savePhotosNow();
+    setStatus('Lienzo y cajón vacíos. ¡A empezar de nuevo!');
+  }
+  $('photoClearAll').onclick = clearAll;
   function removePhoto(id) {
     const i = P.photos.findIndex(p => p.id === id);
     if (i < 0) return;
