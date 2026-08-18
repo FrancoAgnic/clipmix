@@ -136,6 +136,10 @@
   <!-- Sección: Fotos (moodboard / carrusel panorámico) -->
   <section class="photo-layout">
     <div class="photo-stage panel">
+      <div class="photo-toolbar">
+        <button id="photoUndo" class="btn icon" title="Deshacer" disabled>↶</button>
+        <button id="photoRedo" class="btn icon" title="Rehacer" disabled>↷</button>
+      </div>
       <div class="photo-canvas-wrap"><canvas id="photoPreview" width="10" height="10"></canvas></div>
       <div class="pan-row">
         <span class="pan-ico">↔</span>
@@ -151,8 +155,9 @@
           <input id="photoInput" type="file" accept="image/*" multiple hidden />
         </label>
       </div>
+      <h3 style="margin-top:2px">Cajón — toca para agregar al lienzo</h3>
       <ul id="photoList" class="photo-list"></ul>
-      <p id="photoHint" class="hint">Añade fotos y colócalas libremente sobre el lienzo. Pueden superponerse y cruzar los cortes.</p>
+      <p id="photoHint" class="hint">Añade fotos: quedan aquí en el cajón. Toca cada una para soltarla en el lienzo cuando quieras.</p>
 
       <div class="opt-group">
         <h3>Fondo</h3>
@@ -193,6 +198,7 @@
           <button id="photoFront" class="btn small">⤒ Al frente</button>
           <button id="photoBack" class="btn small">⤓ Al fondo</button>
         </div>
+        <button id="photoUnplace" class="btn small full" style="margin-top:8px">↩ Quitar del lienzo (volver al cajón)</button>
         <label class="row switch-row" style="margin-top:10px">
           <span>Marco</span>
           <input id="photoBorder" type="checkbox" />

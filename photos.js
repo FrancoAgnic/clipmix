@@ -62,41 +62,65 @@
       cy: opts.cy != null ? opts.cy : H * (idx % 2 ? 0.62 : 0.42),
       scale: opts.scale || 1, rot: opts.rot || 0,
       border: opts.border ? { ...opts.border } : { on: false, color: '#ffffff', width: 0.04 },
+      placed: opts.placed != null ? opts.placed : false,
     };
     img.onload = () => { p.proxy = makeProxy(img); renderPhoto(); };
     img.src = url;
     if (opts.id != null) nextPid = Math.max(nextPid, opts.id + 1);
     P.photos.push(p);
-    if (!opts.restore) P.selectedId = p.id;
     renderPhotoList(); renderPhoto();
-    if (!opts.restore) { savePhotoBlob(p); savePhotosSoon(); }
+    if (!opts.restore) { savePhotoBlob(p); commitPhoto(); savePhotosSoon(); }
     return p;
   }
+  function placedPhotos() { return P.photos.filter(p => p.placed); }
+
+  // Suelta una foto del cajón al centro de lo que estás viendo
+  function placeOnCanvas(id) {
+    const p = P.photos.find(x => x.id === id); if (!p) return;
+    const { W, H } = boardDims();
+    const v = curView || computeView();
+    const visW = v.viewW / v.scale;
+    const j = (Math.random() - 0.5);
+    p.cx = clamp(v.boardX + visW / 2 + j * visW * 0.18, 0, W);
+    p.cy = clamp(H * (0.5 + j * 0.12), 0, H);
+    p.placed = true;
+    P.photos = P.photos.filter(x => x !== p); P.photos.push(p); // al frente
+    P.selectedId = p.id;
+    renderPhotoList(); syncAdjust(); renderPhoto(); commitPhoto(); savePhotosSoon();
+  }
+  function unplacePhoto() {
+    const p = selectedPhoto(); if (!p) return;
+    p.placed = false;
+    P.selectedId = placedPhotos().slice(-1)[0]?.id ?? null;
+    renderPhotoList(); syncAdjust(); renderPhoto(); commitPhoto(); savePhotosSoon();
+  }
+  $('photoUnplace').onclick = unplacePhoto;
   function removePhoto(id) {
     const i = P.photos.findIndex(p => p.id === id);
     if (i < 0) return;
     URL.revokeObjectURL(P.photos[i].url);
     P.photos.splice(i, 1);
-    if (P.selectedId === id) P.selectedId = P.photos[P.photos.length - 1]?.id ?? null;
-    renderPhotoList(); syncAdjust(); renderPhoto(); delPhotoBlob(id); savePhotosSoon();
+    if (P.selectedId === id) P.selectedId = placedPhotos().slice(-1)[0]?.id ?? null;
+    renderPhotoList(); syncAdjust(); renderPhoto(); delPhotoBlob(id); commitPhoto(); savePhotosSoon();
   }
   function selectPhoto(id) { P.selectedId = id; renderPhotoList(); syncAdjust(); renderPhoto(); }
-  function selectedPhoto() { return P.photos.find(p => p.id === P.selectedId) || null; }
-  function bringFront() { const p = selectedPhoto(); if (!p) return; P.photos = P.photos.filter(x => x !== p); P.photos.push(p); renderPhotoList(); renderPhoto(); savePhotosSoon(); }
-  function sendBack() { const p = selectedPhoto(); if (!p) return; P.photos = P.photos.filter(x => x !== p); P.photos.unshift(p); renderPhotoList(); renderPhoto(); savePhotosSoon(); }
+  function selectedPhoto() { const p = P.photos.find(p => p.id === P.selectedId); return (p && p.placed) ? p : null; }
+  function bringFront() { const p = selectedPhoto(); if (!p) return; P.photos = P.photos.filter(x => x !== p); P.photos.push(p); renderPhotoList(); renderPhoto(); commitPhoto(); savePhotosSoon(); }
+  function sendBack() { const p = selectedPhoto(); if (!p) return; P.photos = P.photos.filter(x => x !== p); P.photos.unshift(p); renderPhotoList(); renderPhoto(); commitPhoto(); savePhotosSoon(); }
   $('photoFront').onclick = bringFront;
   $('photoBack').onclick = sendBack;
 
   // ---------- Lista ----------
   function renderPhotoList() {
     const list = $('photoList'); list.innerHTML = '';
-    $('photoHint').style.display = P.photos.length ? 'none' : 'block';
-    P.photos.slice().reverse().forEach((p) => {
+    const tray = P.photos.filter(p => !p.placed);
+    $('photoHint').style.display = tray.length ? 'none' : 'block';
+    tray.forEach((p) => {
       const li = document.createElement('li');
-      li.className = p.id === P.selectedId ? 'selected' : '';
-      const im = document.createElement('img'); im.src = p.url; im.onclick = () => selectPhoto(p.id);
+      const im = document.createElement('img'); im.src = p.url; im.title = 'Agregar al lienzo'; im.onclick = () => placeOnCanvas(p.id);
+      const add = document.createElement('span'); add.className = 'pv-add'; add.textContent = '＋';
       const rm = document.createElement('button'); rm.className = 'pv-rm'; rm.textContent = '✕'; rm.onclick = () => removePhoto(p.id);
-      li.appendChild(im); li.appendChild(rm);
+      li.appendChild(im); li.appendChild(add); li.appendChild(rm);
       list.appendChild(li);
     });
   }
@@ -111,7 +135,7 @@
       w.appendChild(b);
     });
   }
-  function setBg(col) { P.bg = col; $('photoBg').value = col; buildBgSwatches(); renderPhoto(); savePhotosSoon(); }
+  function setBg(col) { P.bg = col; $('photoBg').value = col; buildBgSwatches(); renderPhoto(); commitPhoto(); savePhotosSoon(); }
   $('photoBg').addEventListener('input', () => setBg($('photoBg').value));
 
   // ---------- Formato / slides ----------
@@ -123,18 +147,19 @@
       tile.dataset.pformat = key;
       const ar = def.w / def.h, bw = ar >= 1 ? 30 : 30 * ar, bh = ar >= 1 ? 30 / ar : 30;
       tile.innerHTML = `<svg viewBox="0 0 34 34"><rect class="cell" x="${(34 - bw) / 2}" y="${(34 - bh) / 2}" width="${bw}" height="${bh}" rx="2"/></svg><span>${def.label}</span>`;
-      tile.onclick = () => { P.format = key; refreshPhotoFormat(); renderPhoto(); savePhotosSoon(); };
+      tile.onclick = () => { P.format = key; refreshPhotoFormat(); renderPhoto(); commitPhoto(); savePhotosSoon(); };
       grid.appendChild(tile);
     });
   }
   function refreshPhotoFormat() { document.querySelectorAll('[data-pformat]').forEach(t => t.classList.toggle('active', t.dataset.pformat === P.format)); }
   $('slidesMinus').onclick = () => setSlides(P.slides - 1);
   $('slidesPlus').onclick = () => setSlides(P.slides + 1);
-  function setSlides(n) { P.slides = clamp(n, 1, 12); $('slidesVal').textContent = P.slides; renderPhoto(); savePhotosSoon(); }
+  function setSlides(n) { P.slides = clamp(n, 1, 12); $('slidesVal').textContent = P.slides; renderPhoto(); commitPhoto(); savePhotosSoon(); }
 
   // ---------- Ajuste de foto seleccionada (zoom/rot/marco) ----------
   function syncAdjust() {
     const p = selectedPhoto();
+    $('photoAdjustGroup').style.display = p ? 'block' : 'none';
     $('photoZoom').value = p ? Math.round(p.scale * 100) : 100;
     $('photoZoomVal').textContent = (p ? Math.round(p.scale * 100) : 100) + '%';
     $('photoRot').value = p ? Math.round(p.rot) : 0;
@@ -149,13 +174,13 @@
   }
   $('photoZoom').addEventListener('input', () => { const p = selectedPhoto(); if (!p) return; p.scale = parseInt($('photoZoom').value) / 100; $('photoZoomVal').textContent = Math.round(p.scale * 100) + '%'; renderPhoto(); });
   $('photoRot').addEventListener('input', () => { const p = selectedPhoto(); if (!p) return; p.rot = parseInt($('photoRot').value); $('photoRotVal').textContent = Math.round(p.rot) + '°'; renderPhoto(); });
-  $('photoZoom').addEventListener('change', savePhotosSoon);
-  $('photoRot').addEventListener('change', savePhotosSoon);
-  $('photoBorder').addEventListener('change', () => { const p = selectedPhoto(); if (!p) return; p.border.on = $('photoBorder').checked; $('photoBorderOpts').style.display = p.border.on ? 'block' : 'none'; renderPhoto(); savePhotosSoon(); });
+  $('photoZoom').addEventListener('change', () => { commitPhoto(); savePhotosSoon(); });
+  $('photoRot').addEventListener('change', () => { commitPhoto(); savePhotosSoon(); });
+  $('photoBorder').addEventListener('change', () => { const p = selectedPhoto(); if (!p) return; p.border.on = $('photoBorder').checked; $('photoBorderOpts').style.display = p.border.on ? 'block' : 'none'; renderPhoto(); commitPhoto(); savePhotosSoon(); });
   $('photoBorderColor').addEventListener('input', () => { const p = selectedPhoto(); if (!p) return; p.border.color = $('photoBorderColor').value; buildBorderSwatches(); renderPhoto(); });
-  $('photoBorderColor').addEventListener('change', savePhotosSoon);
+  $('photoBorderColor').addEventListener('change', () => { commitPhoto(); savePhotosSoon(); });
   $('photoBorderW').addEventListener('input', () => { const p = selectedPhoto(); if (!p) return; p.border.width = parseFloat($('photoBorderW').value) / 100; $('photoBorderWVal').textContent = parseFloat($('photoBorderW').value) + '%'; renderPhoto(); });
-  $('photoBorderW').addEventListener('change', savePhotosSoon);
+  $('photoBorderW').addEventListener('change', () => { commitPhoto(); savePhotosSoon(); });
   function buildBorderSwatches() {
     const w = $('photoBorderSwatches'); if (!w) return; w.innerHTML = '';
     const p = selectedPhoto(); const cur = p ? p.border.color : '#ffffff';
@@ -194,7 +219,7 @@
   }
   function drawBoard(c, W, H, guides, useProxy) {
     c.fillStyle = P.bg; c.fillRect(0, 0, W, H);
-    P.photos.forEach(p => drawPhotoObj(c, p, useProxy));
+    placedPhotos().forEach(p => drawPhotoObj(c, p, useProxy));
     if (guides) {
       const { sw } = boardDims();
       c.strokeStyle = 'rgba(255,255,255,.9)'; c.lineWidth = Math.max(2, W * 0.0016); c.setLineDash([H * 0.02, H * 0.02]);
@@ -249,7 +274,7 @@
 
   // ---------- Gestos ----------
   const pts = new Map();
-  let last = null, pinch = null;
+  let last = null, pinch = null, pMoved = false;
   function toBoard(e) {
     const r = cv.getBoundingClientRect(); const v = curView || computeView();
     const kx = v.viewW / (r.width || v.viewW), ky = previewH / (r.height || previewH);
@@ -261,7 +286,7 @@
     const rx = dx * Math.cos(a) - dy * Math.sin(a), ry = dx * Math.sin(a) + dy * Math.cos(a);
     return Math.abs(rx) <= w / 2 && Math.abs(ry) <= h / 2;
   }
-  function topmostAt(x, y) { for (let i = P.photos.length - 1; i >= 0; i--) if (hitPhoto(P.photos[i], x, y)) return P.photos[i]; return null; }
+  function topmostAt(x, y) { const ph = placedPhotos(); for (let i = ph.length - 1; i >= 0; i--) if (hitPhoto(ph[i], x, y)) return ph[i]; return null; }
   cv.addEventListener('pointerdown', (e) => {
     cv.setPointerCapture(e.pointerId);
     const p = toBoard(e); pts.set(e.pointerId, p);
@@ -281,17 +306,17 @@
     if (pts.size === 1 && last) {
       ph.cx = clamp(ph.cx + (p.x - last.x), 0, W);
       ph.cy = clamp(ph.cy + (p.y - last.y), 0, H);
-      last = p; renderPhoto();
+      last = p; pMoved = true; renderPhoto();
     } else if (pts.size === 2 && pinch) {
       const a = [...pts.values()];
       const d = Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y);
       const ang = Math.atan2(a[1].y - a[0].y, a[1].x - a[0].x);
       ph.scale = clamp(pinch.scale * (d / pinch.d), 0.1, 6);
       ph.rot = pinch.rot + (ang - pinch.ang) * 180 / Math.PI;
-      syncAdjust(); renderPhoto();
+      pMoved = true; syncAdjust(); renderPhoto();
     }
   });
-  function endPt(e) { pts.delete(e.pointerId); if (pts.size < 2) pinch = null; if (pts.size === 0) { last = null; savePhotosSoon(); } }
+  function endPt(e) { pts.delete(e.pointerId); if (pts.size < 2) pinch = null; if (pts.size === 0) { last = null; if (pMoved) { pMoved = false; commitPhoto(); } savePhotosSoon(); } }
   cv.addEventListener('pointerup', endPt);
   cv.addEventListener('pointercancel', endPt);
 
@@ -322,7 +347,7 @@
   function savePhotosNow() {
     const meta = {
       format: P.format, slides: P.slides, bg: P.bg, selectedId: P.selectedId,
-      photos: P.photos.map(p => ({ id: p.id, name: p.name, cx: p.cx, cy: p.cy, scale: p.scale, rot: p.rot, border: { ...p.border } })),
+      photos: P.photos.map(p => ({ id: p.id, name: p.name, cx: p.cx, cy: p.cy, scale: p.scale, rot: p.rot, placed: p.placed, border: { ...p.border } })),
     };
     try { localStorage.setItem(PHOTOS_KEY, JSON.stringify(meta)); } catch (_) {}
   }
@@ -337,10 +362,49 @@
     for (const pm of meta.photos) {
       let file; try { file = await clipStore.get('photo_' + pm.id); } catch (_) {}
       if (!file) continue;
-      addPhoto(file, { restore: true, id: pm.id, cx: pm.cx, cy: pm.cy, scale: pm.scale, rot: pm.rot, border: pm.border });
+      addPhoto(file, { restore: true, id: pm.id, cx: pm.cx, cy: pm.cy, scale: pm.scale, rot: pm.rot, border: pm.border, placed: pm.placed != null ? pm.placed : true });
     }
     if (meta.selectedId != null && P.photos.find(p => p.id === meta.selectedId)) P.selectedId = meta.selectedId;
   }
+
+  // ---------- Historial: deshacer / rehacer ----------
+  let pHist = [], pIdx = -1; const PHIST_MAX = 60;
+  function photoSnap() {
+    return {
+      order: P.photos.map(p => p.id),
+      props: P.photos.map(p => ({ id: p.id, cx: p.cx, cy: p.cy, scale: p.scale, rot: p.rot, placed: p.placed, border: { ...p.border } })),
+      bg: P.bg, format: P.format, slides: P.slides, selectedId: P.selectedId,
+    };
+  }
+  function commitPhoto() {
+    const s = photoSnap(), j = JSON.stringify(s);
+    if (pIdx >= 0 && JSON.stringify(pHist[pIdx]) === j) return;
+    pHist = pHist.slice(0, pIdx + 1); pHist.push(s);
+    if (pHist.length > PHIST_MAX) pHist.shift();
+    pIdx = pHist.length - 1; updatePhotoUndo();
+  }
+  function applyPhotoSnap(s) {
+    const byId = new Map(P.photos.map(p => [p.id, p]));
+    const arr = []; s.order.forEach(id => { const p = byId.get(id); if (p) arr.push(p); });
+    P.photos.forEach(p => { if (!s.order.includes(p.id)) arr.push(p); });
+    P.photos = arr;
+    s.props.forEach(pr => { const p = byId.get(pr.id); if (p) { p.cx = pr.cx; p.cy = pr.cy; p.scale = pr.scale; p.rot = pr.rot; p.placed = pr.placed; p.border = { ...pr.border }; } });
+    P.bg = s.bg; if (SLIDE[s.format]) P.format = s.format; P.slides = clamp(s.slides, 1, 12);
+    P.selectedId = (byId.get(s.selectedId) && byId.get(s.selectedId).placed) ? s.selectedId : (placedPhotos().slice(-1)[0]?.id ?? null);
+    refreshPhotoFormat(); $('slidesVal').textContent = P.slides; $('photoBg').value = P.bg; buildBgSwatches();
+    renderPhotoList(); syncAdjust(); renderPhoto(); savePhotosSoon(); updatePhotoUndo();
+  }
+  function undoPhoto() { if (pIdx <= 0) return; pIdx--; applyPhotoSnap(pHist[pIdx]); }
+  function redoPhoto() { if (pIdx >= pHist.length - 1) return; pIdx++; applyPhotoSnap(pHist[pIdx]); }
+  function updatePhotoUndo() { $('photoUndo').disabled = pIdx <= 0; $('photoRedo').disabled = pIdx >= pHist.length - 1; }
+  $('photoUndo').onclick = undoPhoto;
+  $('photoRedo').onclick = redoPhoto;
+  window.addEventListener('keydown', (e) => {
+    if (document.body.dataset.section !== 'photos') return;
+    const k = e.key.toLowerCase();
+    if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); e.shiftKey ? redoPhoto() : undoPhoto(); }
+    else if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redoPhoto(); }
+  });
 
   // ---------- Arranque ----------
   async function initPhotos() {
@@ -356,6 +420,8 @@
     renderPhotoList();
     syncAdjust();
     renderPhoto();
+    commitPhoto();
+    updatePhotoUndo();
   }
   initPhotos();
   window.__photoBoard = P;
