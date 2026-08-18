@@ -2,7 +2,7 @@
  * Estrategia "red primero" para el app shell: con internet siempre trae lo
  * más nuevo (auto-actualización); sin internet usa lo cacheado.
  */
-const CACHE = 'clipmix-v11';
+const CACHE = 'clipmix-v12';
 const ASSETS = [
   './',
   './index.html',

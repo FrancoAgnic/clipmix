@@ -62,6 +62,7 @@
       cy: opts.cy != null ? opts.cy : H * (idx % 2 ? 0.62 : 0.42),
       scale: opts.scale || 1, rot: opts.rot || 0,
       border: opts.border ? { ...opts.border } : { on: false, color: '#ffffff', width: 0.04 },
+      feather: opts.feather || 0,
       placed: opts.placed != null ? opts.placed : false,
     };
     img.onload = () => { p.proxy = makeProxy(img); renderPhoto(); };
@@ -184,6 +185,8 @@
     $('photoZoomVal').textContent = (p ? Math.round(p.scale * 100) : 100) + '%';
     $('photoRot').value = p ? Math.round(p.rot) : 0;
     $('photoRotVal').textContent = (p ? Math.round(p.rot) : 0) + '°';
+    $('photoFeather').value = p ? Math.round(p.feather * 100) : 0;
+    $('photoFeatherVal').textContent = (p ? Math.round(p.feather * 100) : 0) + '%';
     const bd = p ? p.border : { on: false, color: '#ffffff', width: 0.04 };
     $('photoBorder').checked = bd.on;
     $('photoBorderColor').value = bd.color;
@@ -194,8 +197,10 @@
   }
   $('photoZoom').addEventListener('input', () => { const p = selectedPhoto(); if (!p) return; p.scale = parseInt($('photoZoom').value) / 100; $('photoZoomVal').textContent = Math.round(p.scale * 100) + '%'; renderPhoto(); });
   $('photoRot').addEventListener('input', () => { const p = selectedPhoto(); if (!p) return; p.rot = parseInt($('photoRot').value); $('photoRotVal').textContent = Math.round(p.rot) + '°'; renderPhoto(); });
+  $('photoFeather').addEventListener('input', () => { const p = selectedPhoto(); if (!p) return; p.feather = parseInt($('photoFeather').value) / 100; $('photoFeatherVal').textContent = parseInt($('photoFeather').value) + '%'; renderPhoto(); });
   $('photoZoom').addEventListener('change', () => { commitPhoto(); savePhotosSoon(); });
   $('photoRot').addEventListener('change', () => { commitPhoto(); savePhotosSoon(); });
+  $('photoFeather').addEventListener('change', () => { commitPhoto(); savePhotosSoon(); });
   $('photoBorder').addEventListener('change', () => { const p = selectedPhoto(); if (!p) return; p.border.on = $('photoBorder').checked; $('photoBorderOpts').style.display = p.border.on ? 'block' : 'none'; renderPhoto(); commitPhoto(); savePhotosSoon(); });
   $('photoBorderColor').addEventListener('input', () => { const p = selectedPhoto(); if (!p) return; p.border.color = $('photoBorderColor').value; buildBorderSwatches(); renderPhoto(); });
   $('photoBorderColor').addEventListener('change', () => { commitPhoto(); savePhotosSoon(); });
@@ -222,9 +227,32 @@
     const s = targetLong / Math.max(img.naturalWidth, img.naturalHeight);
     return { w: img.naturalWidth * s, h: img.naturalHeight * s };
   }
+  // Versión de la foto con bordes desvanecidos (cacheada por tamaño/feather)
+  function getFeathered(p, src) {
+    const sw = src.width || src.naturalWidth, sh = src.height || src.naturalHeight;
+    if (!sw || !sh) return src;
+    const key = `${sw}x${sh}_${p.feather.toFixed(3)}`;
+    if (p._feather && p._feather.key === key) return p._feather.c;
+    const oc = document.createElement('canvas'); oc.width = sw; oc.height = sh;
+    const g = oc.getContext('2d');
+    g.drawImage(src, 0, 0, sw, sh);
+    const f = clamp(Math.min(sw, sh) * p.feather, 1, Math.min(sw, sh) * 0.48);
+    const mc = document.createElement('canvas'); mc.width = sw; mc.height = sh;
+    const mg = mc.getContext('2d');
+    mg.fillStyle = '#fff';
+    try { mg.filter = `blur(${f * 0.6}px)`; } catch (_) {}
+    mg.fillRect(f, f, sw - 2 * f, sh - 2 * f);
+    mg.filter = 'none';
+    g.globalCompositeOperation = 'destination-in';
+    g.drawImage(mc, 0, 0);
+    g.globalCompositeOperation = 'source-over';
+    p._feather = { key, c: oc };
+    return oc;
+  }
   function drawPhotoObj(c, p, useProxy) {
     const { w, h } = photoSize(p);
-    const src = (useProxy && p.proxy) ? p.proxy : (p.img && p.img.complete && p.img.naturalWidth ? p.img : null);
+    let src = (useProxy && p.proxy) ? p.proxy : (p.img && p.img.complete && p.img.naturalWidth ? p.img : null);
+    if (src && p.feather > 0) src = getFeathered(p, src);
     c.save();
     c.translate(p.cx, p.cy);
     if (p.rot) c.rotate(p.rot * Math.PI / 180);
@@ -374,7 +402,7 @@
   function savePhotosNow() {
     const meta = {
       format: P.format, slides: P.slides, bg: P.bg, bg2: P.bg2, bgMode: P.bgMode, bgDir: P.bgDir, selectedId: P.selectedId,
-      photos: P.photos.map(p => ({ id: p.id, name: p.name, cx: p.cx, cy: p.cy, scale: p.scale, rot: p.rot, placed: p.placed, border: { ...p.border } })),
+      photos: P.photos.map(p => ({ id: p.id, name: p.name, cx: p.cx, cy: p.cy, scale: p.scale, rot: p.rot, feather: p.feather, placed: p.placed, border: { ...p.border } })),
     };
     try { localStorage.setItem(PHOTOS_KEY, JSON.stringify(meta)); } catch (_) {}
   }
@@ -392,7 +420,7 @@
     for (const pm of meta.photos) {
       let file; try { file = await clipStore.get('photo_' + pm.id); } catch (_) {}
       if (!file) continue;
-      addPhoto(file, { restore: true, id: pm.id, cx: pm.cx, cy: pm.cy, scale: pm.scale, rot: pm.rot, border: pm.border, placed: pm.placed != null ? pm.placed : true });
+      addPhoto(file, { restore: true, id: pm.id, cx: pm.cx, cy: pm.cy, scale: pm.scale, rot: pm.rot, feather: pm.feather, border: pm.border, placed: pm.placed != null ? pm.placed : true });
     }
     if (meta.selectedId != null && P.photos.find(p => p.id === meta.selectedId)) P.selectedId = meta.selectedId;
   }
@@ -402,7 +430,7 @@
   function photoSnap() {
     return {
       order: P.photos.map(p => p.id),
-      props: P.photos.map(p => ({ id: p.id, cx: p.cx, cy: p.cy, scale: p.scale, rot: p.rot, placed: p.placed, border: { ...p.border } })),
+      props: P.photos.map(p => ({ id: p.id, cx: p.cx, cy: p.cy, scale: p.scale, rot: p.rot, feather: p.feather, placed: p.placed, border: { ...p.border } })),
       bg: P.bg, bg2: P.bg2, bgMode: P.bgMode, bgDir: P.bgDir, format: P.format, slides: P.slides, selectedId: P.selectedId,
     };
   }
@@ -418,7 +446,7 @@
     const arr = []; s.order.forEach(id => { const p = byId.get(id); if (p) arr.push(p); });
     P.photos.forEach(p => { if (!s.order.includes(p.id)) arr.push(p); });
     P.photos = arr;
-    s.props.forEach(pr => { const p = byId.get(pr.id); if (p) { p.cx = pr.cx; p.cy = pr.cy; p.scale = pr.scale; p.rot = pr.rot; p.placed = pr.placed; p.border = { ...pr.border }; } });
+    s.props.forEach(pr => { const p = byId.get(pr.id); if (p) { p.cx = pr.cx; p.cy = pr.cy; p.scale = pr.scale; p.rot = pr.rot; p.feather = pr.feather || 0; p.placed = pr.placed; p.border = { ...pr.border }; } });
     P.bg = s.bg; if (s.bg2) P.bg2 = s.bg2; if (s.bgMode) P.bgMode = s.bgMode; if (s.bgDir) P.bgDir = s.bgDir;
     if (SLIDE[s.format]) P.format = s.format; P.slides = clamp(s.slides, 1, 12);
     P.selectedId = (byId.get(s.selectedId) && byId.get(s.selectedId).placed) ? s.selectedId : (placedPhotos().slice(-1)[0]?.id ?? null);
