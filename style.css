@@ -248,6 +248,7 @@ body[data-section="photos"] .photo-layout { display: flex; flex-direction: colum
 .photo-canvas-wrap { background: #000; border-radius: 10px; overflow: hidden; position: relative; padding: 8px; display: flex; justify-content: center; align-items: center; }
 #photoPreview { display: block; background: #111; border-radius: 4px; touch-action: none; }
 #photoBorderOpts { margin-top: 8px; }
+.head-actions { display: flex; gap: 8px; align-items: center; }
 .photo-toolbar { display: flex; gap: 8px; margin-bottom: 8px; }
 #photoGradOpts { margin-top: 8px; }
 .dir-row { display: flex; gap: 8px; margin-top: 8px; }

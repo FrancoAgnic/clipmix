@@ -150,10 +150,13 @@
     <aside class="photo-panel panel">
       <div class="panel-head">
         <h2>Moodboard</h2>
-        <label class="btn btn-primary">
-          + Fotos / Video
-          <input id="photoInput" type="file" accept="image/*,video/*" multiple hidden />
-        </label>
+        <div class="head-actions">
+          <button id="photoOneDrive" class="btn small" title="Agregar desde OneDrive">☁ OneDrive</button>
+          <label class="btn btn-primary">
+            + Fotos / Video
+            <input id="photoInput" type="file" accept="image/*,video/*" multiple hidden />
+          </label>
+        </div>
       </div>
       <h3 style="margin-top:2px">Cajón — toca para agregar al lienzo</h3>
       <ul id="photoList" class="photo-list"></ul>

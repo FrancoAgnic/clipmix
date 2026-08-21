@@ -75,6 +75,69 @@
     e.target.value = '';
   });
 
+  // ---------- OneDrive (elegir archivos de la nube y descargarlos) ----------
+  const OD_CLIENT_KEY = 'clipmix_onedrive_client';
+  let odScript = null;
+  function loadOneDriveSDK() {
+    if (window.OneDrive) return Promise.resolve();
+    if (odScript) return odScript;
+    odScript = new Promise((res, rej) => {
+      const s = document.createElement('script');
+      s.src = 'https://js.live.net/v7.2/OneDrive.js';
+      s.onload = () => res(); s.onerror = () => rej(new Error('No se pudo cargar el selector de OneDrive (¿sin internet?).'));
+      document.head.appendChild(s);
+    });
+    return odScript;
+  }
+  function isVideoFile(name, mime) {
+    if (mime && mime.startsWith('video')) return true;
+    return /\.(mp4|mov|m4v|webm|avi|mkv|3gp|hevc)$/i.test(name || '');
+  }
+  async function openOneDrive() {
+    let clientId = '';
+    try { clientId = localStorage.getItem(OD_CLIENT_KEY) || ''; } catch (_) {}
+    if (!clientId) {
+      clientId = (window.prompt('Pega tu Client ID de OneDrive (Microsoft). Se guarda solo en este dispositivo.\n\nSi aún no lo tienes, mira los pasos en el botón y cancela por ahora.') || '').trim();
+      if (!clientId) return;
+      try { localStorage.setItem(OD_CLIENT_KEY, clientId); } catch (_) {}
+    }
+    setStatus('Abriendo OneDrive…');
+    try { await loadOneDriveSDK(); } catch (e) { setStatus(e.message); return; }
+    window.OneDrive.open({
+      clientId,
+      action: 'download',
+      multiSelect: true,
+      openInNewWindow: true,
+      advanced: {
+        redirectUri: location.origin + location.pathname,
+        filter: '.jpg,.jpeg,.png,.heic,.heif,.gif,.webp,.mp4,.mov,.m4v,.webm,.3gp',
+      },
+      success: async (resp) => {
+        const files = (resp && resp.value) || [];
+        if (!files.length) { setStatus(''); return; }
+        setStatus(`Descargando ${files.length} archivo(s) de OneDrive…`);
+        let ok = 0;
+        for (const f of files) {
+          const url = f['@microsoft.graph.downloadUrl'] || f['@content.downloadUrl'];
+          const name = f.name || 'onedrive';
+          const mime = (f.file && f.file.mimeType) || '';
+          if (!url) continue;
+          try {
+            const r = await fetch(url);
+            const blob = await r.blob();
+            const file = new File([blob], name, { type: blob.type || mime });
+            if (isVideoFile(name, file.type)) addVideo(file); else addPhoto(file);
+            ok++;
+          } catch (_) {}
+        }
+        setStatus(ok ? `Agregados ${ok} al cajón desde OneDrive.` : 'No se pudieron descargar los archivos (revisa tu conexión/permisos).');
+      },
+      cancel: () => { setStatus(''); },
+      error: (e) => { setStatus('OneDrive: ' + ((e && e.message) || 'error. Verifica el Client ID y el dominio permitido.')); },
+    });
+  }
+  $('photoOneDrive').onclick = openOneDrive;
+
   function addVideo(file, opts = {}) {
     const url = URL.createObjectURL(file);
     const video = document.createElement('video');
