@@ -97,6 +97,53 @@
     if (skipped) setStatus(`Se ignoraron ${skipped} archivo(s) que no son foto ni video.`);
   });
 
+  // Importar desde un enlace de OneDrive (carpeta o archivo compartido)
+  function encodeShare(url) {
+    const b = btoa(unescape(encodeURIComponent(url)));
+    return 'u!' + b.replace(/=+$/, '').replace(/\//g, '_').replace(/\+/g, '-');
+  }
+  async function importFromLink() {
+    const raw = window.prompt('Pega el enlace de OneDrive de una CARPETA compartida (para bajar varios) o de un archivo. Puedes pegar varios enlaces, uno por línea:');
+    if (!raw) return;
+    const urls = raw.split(/\s+/).map(s => s.trim()).filter(u => /^https?:\/\//i.test(u));
+    if (!urls.length) { setStatus('No se reconoció ningún enlace.'); return; }
+    setStatus('Leyendo enlace(s) de OneDrive…');
+    let added = 0, failed = 0;
+    for (const u of urls) {
+      let items = [];
+      try {
+        const id = encodeShare(u);
+        try {
+          const r = await fetch(`https://api.onedrive.com/v1.0/shares/${id}/root/children`);
+          if (r.ok) { const j = await r.json(); items = (j.value || []).filter(it => it.file); }
+        } catch (_) {}
+        if (!items.length) {
+          const r2 = await fetch(`https://api.onedrive.com/v1.0/shares/${id}/root`);
+          if (r2.ok) { const it = await r2.json(); if (it && it.file) items = [it]; }
+        }
+      } catch (_) { failed++; continue; }
+      if (!items.length) { failed++; continue; }
+      for (const it of items) {
+        const durl = it['@microsoft.graph.downloadUrl'] || it['@content.downloadUrl'];
+        const name = it.name || 'onedrive';
+        const mime = (it.file && it.file.mimeType) || '';
+        if (!durl || !(isVideoFile(name, mime) || isImageFile(name, mime))) continue;
+        try {
+          setStatus(`Descargando ${name}…`);
+          const rr = await fetch(durl);
+          const blob = await rr.blob();
+          const file = new File([blob], name, { type: blob.type || mime });
+          if (isVideoFile(file.name, file.type)) addVideo(file); else addPhoto(file);
+          added++;
+        } catch (_) { failed++; }
+      }
+    }
+    setStatus(added
+      ? `Agregados ${added} desde OneDrive${failed ? ` (${failed} no se pudieron)` : ''}.`
+      : 'No se pudo acceder. Microsoft puede bloquear el acceso directo desde el navegador; usa la app de OneDrive para descargar y luego «+ Fotos / Video».');
+  }
+  $('photoLink').onclick = importFromLink;
+
   function addVideo(file, opts = {}) {
     const url = URL.createObjectURL(file);
     const video = document.createElement('video');
